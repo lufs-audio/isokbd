@@ -1,0 +1,17 @@
+[package]
+name = "isokbd"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ratatui = "0.29"
+crossterm = "0.28"
+midir = "0.10"
+anyhow = "1.0"
+thiserror = "2.0"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+indexing_slicing = "warn"
