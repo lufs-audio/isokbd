@@ -36,13 +36,17 @@ fn main() -> Result<()> {
     // Initialize MIDI Output
     let midi_engine = MidiEngine::new().context("Could not initialize MIDI engine")?;
 
-    // Initialize terminal in raw mode with keyboard enhancements (for KeyRelease events)
+    // Initialize terminal in raw mode with full keyboard enhancements
+    // (REPORT_ALL_KEYS_AS_ESCAPE_CODES enables KeyRelease and Repeat events for text keys)
     enable_raw_mode().context("Failed to enable terminal raw mode")?;
     let mut stdout = stdout();
+    let enhancement_flags = KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+        | KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES
+        | KeyboardEnhancementFlags::REPORT_EVENT_TYPES;
     execute!(
         stdout,
         EnterAlternateScreen,
-        PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::REPORT_EVENT_TYPES)
+        PushKeyboardEnhancementFlags(enhancement_flags)
     ).context("Failed to configure terminal enhancements")?;
 
     let backend = CrosstermBackend::new(stdout);

@@ -40,13 +40,15 @@ impl App {
     }
 
     /// Periodic tick called every frame (~16ms).
-    /// Detects key releases in terminals or multiplexers (like Herdr/tmux) that do not
+    /// Detects key releases in terminals or multiplexers that do not
     /// forward the Kitty keyboard protocol KeyRelease escape sequence.
     pub fn tick(&mut self) {
         let now = Instant::now();
-        // A typematic key repeat on Linux usually fires every 30-35ms.
-        // If 150ms elapse with no new event, the user has let go of the physical key.
-        let decay_timeout = Duration::from_millis(150);
+        // Fallback timeout for terminals or multiplexers that do not send KeyRelease events:
+        // Typematic initial repeat delay in Wayland/Hyprland is typically 250-300ms.
+        // We set the decay timeout to 320ms so a held key never gets cut off before
+        // the first repeat pulse arrives.
+        let decay_timeout = Duration::from_millis(320);
 
         let expired: Vec<(usize, usize)> = self
             .active_coords
