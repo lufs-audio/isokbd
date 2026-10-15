@@ -1,1 +1,17 @@
+# Rust build artifacts
 /target
+**/*.rs.bk
+*.bk
+
+# IDE and OS files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Cargo profiling / perf
+*.profraw
+*.profdata
