@@ -1,5 +1,6 @@
 //! MIDI Output engine leveraging `midir`.
 
+use std::process::Command;
 use midir::os::unix::VirtualOutput;
 use midir::{MidiOutput, MidiOutputConnection};
 use thiserror::Error;
@@ -15,92 +16,96 @@ pub enum MidiError {
 }
 
 pub struct MidiEngine {
-    connection: MidiOutputConnection,
-    port_name: String,
+    connections: Vec<MidiOutputConnection>,
+    port_names: Vec<String>,
     channel: u8, // 0-indexed (0..15)
 }
 
 impl MidiEngine {
-    /// Initializes MIDI connection. Prefers "Midi Through" port on Linux if available,
-    /// otherwise falls back to creating a virtual ALSA port named "isokbd".
+    /// Initializes MIDI connection. Connects to all available destination ports
+    /// (e.g. `RTRACK_MIDI_IN`, `Midi Through Port-0`), and bridges ALSA ports if rtrack is active.
     pub fn new() -> Result<Self, MidiError> {
-        let midi_out = MidiOutput::new("isokbd")
+        // Attempt ALSA bridge to rtrack if both exist
+        let _ = Command::new("aconnect")
+            .args(["Midi Through", "RTRACK_MIDI_IN"])
+            .output();
+
+        let midi_out = MidiOutput::new("isokbd-probe")
             .map_err(|e| MidiError::Init(e.to_string()))?;
 
         let ports = midi_out.ports();
+        let mut connections = Vec::new();
+        let mut port_names = Vec::new();
 
-        // Check if there is an existing "Midi Through" port
-        let through_port = ports.iter().find(|p| {
-            midi_out
-                .port_name(p)
-                .map(|name| name.contains("Midi Through"))
-                .unwrap_or(false)
-        });
-
-        if let Some(port) = through_port {
+        for (idx, port) in ports.iter().enumerate() {
             let name = midi_out
                 .port_name(port)
-                .unwrap_or_else(|_| "Midi Through".to_string());
-            let connection = midi_out
-                .connect(port, "isokbd-client")
-                .map_err(|e| MidiError::Connect(e.to_string()))?;
+                .unwrap_or_else(|_| format!("Port {idx}"));
 
-            Ok(Self {
-                connection,
-                port_name: name,
-                channel: 0,
-            })
-        } else if let Some(first_port) = ports.first() {
-            let name = midi_out
-                .port_name(first_port)
-                .unwrap_or_else(|_| "Default Port".to_string());
-            let connection = midi_out
-                .connect(first_port, "isokbd-client")
-                .map_err(|e| MidiError::Connect(e.to_string()))?;
+            if name.contains("isokbd") {
+                continue;
+            }
 
-            Ok(Self {
-                connection,
-                port_name: name,
-                channel: 0,
-            })
-        } else {
+            if let Ok(out) = MidiOutput::new(&format!("isokbd-out-{idx}"))
+                && let Ok(conn) = out.connect(port, &format!("isokbd-client-{idx}"))
+            {
+                connections.push(conn);
+                port_names.push(name);
+            }
+        }
+
+        if connections.is_empty() {
             // Virtual port fallback on Linux
-            let connection = midi_out
+            let out = MidiOutput::new("isokbd")
+                .map_err(|e| MidiError::Init(e.to_string()))?;
+            let conn = out
                 .create_virtual("isokbd")
                 .map_err(|e| MidiError::Connect(e.to_string()))?;
-
-            Ok(Self {
-                connection,
-                port_name: "Virtual Port (isokbd)".to_string(),
-                channel: 0,
-            })
+            connections.push(conn);
+            port_names.push("isokbd (virtual)".to_string());
         }
+
+        Ok(Self {
+            connections,
+            port_names,
+            channel: 0,
+        })
     }
 
     #[must_use]
-    pub fn port_name(&self) -> &str {
-        &self.port_name
+    pub fn port_name(&self) -> String {
+        if self.port_names.is_empty() {
+            "None".to_string()
+        } else {
+            self.port_names.join(", ")
+        }
     }
 
     pub fn send_note_on(&mut self, note: u8, velocity: u8) -> Result<(), MidiError> {
         let status = 0x90 | (self.channel & 0x0F);
-        self.connection
-            .send(&[status, note & 0x7F, velocity & 0x7F])
-            .map_err(|e| MidiError::Send(e.to_string()))
+        let msg = [status, note & 0x7F, velocity & 0x7F];
+        for conn in &mut self.connections {
+            conn.send(&msg).map_err(|e| MidiError::Send(e.to_string()))?;
+        }
+        Ok(())
     }
 
     pub fn send_note_off(&mut self, note: u8) -> Result<(), MidiError> {
         let status = 0x80 | (self.channel & 0x0F);
-        self.connection
-            .send(&[status, note & 0x7F, 0])
-            .map_err(|e| MidiError::Send(e.to_string()))
+        let msg = [status, note & 0x7F, 0];
+        for conn in &mut self.connections {
+            conn.send(&msg).map_err(|e| MidiError::Send(e.to_string()))?;
+        }
+        Ok(())
     }
 
     pub fn all_notes_off(&mut self) -> Result<(), MidiError> {
         // Control Change 123 (All Notes Off)
         let status = 0xB0 | (self.channel & 0x0F);
-        self.connection
-            .send(&[status, 123, 0])
-            .map_err(|e| MidiError::Send(e.to_string()))
+        let msg = [status, 123, 0];
+        for conn in &mut self.connections {
+            conn.send(&msg).map_err(|e| MidiError::Send(e.to_string()))?;
+        }
+        Ok(())
     }
 }

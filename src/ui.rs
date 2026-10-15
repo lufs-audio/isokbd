@@ -93,7 +93,7 @@ fn render_keyboard_grid(frame: &mut Frame, area: Rect, app: &App) {
         }
 
         for key in keys {
-            let is_active = app.active_coords.contains(&(row_idx, key.col));
+            let is_active = app.active_coords.contains_key(&(row_idx, key.col));
             let midi_note = calculate_midi_note(row_idx, key.col, app.root_note, app.layout_mode);
             let note_str = midi_note.map(note_to_name).unwrap_or_else(|| "--".to_string());
 

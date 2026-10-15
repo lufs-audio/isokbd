@@ -52,6 +52,8 @@ fn main() -> Result<()> {
     let tick_rate = Duration::from_millis(16); // ~60 FPS update rate
 
     while !app.should_quit {
+        app.tick();
+
         terminal.draw(|frame| {
             ui::render(frame, &app);
         }).context("Failed to draw TUI frame")?;

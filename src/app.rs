@@ -1,6 +1,7 @@
-//! Main application state and event loop coordination.
+//! Main application state, event handling, and inactivity decay loop.
 
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
+use std::time::{Duration, Instant};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 use crate::layout::{calculate_midi_note, char_to_coord, LayoutMode};
@@ -12,7 +13,7 @@ pub struct App {
     pub root_note: u8, // Base MIDI note for (row: 0, col: 0)
     pub velocity: u8,
     pub sustain_enabled: bool,
-    pub active_coords: HashSet<(usize, usize)>,
+    pub active_coords: HashMap<(usize, usize), Instant>,
     pub active_notes: BTreeSet<u8>,
     pub sustained_notes: HashSet<u8>,
     pub midi: MidiEngine,
@@ -28,13 +29,34 @@ impl App {
             root_note: 48, // C3
             velocity: 100,
             sustain_enabled: false,
-            active_coords: HashSet::new(),
+            active_coords: HashMap::new(),
             active_notes: BTreeSet::new(),
             sustained_notes: HashSet::new(),
             midi,
             detected_chord: None,
             status_message: None,
             should_quit: false,
+        }
+    }
+
+    /// Periodic tick called every frame (~16ms).
+    /// Detects key releases in terminals or multiplexers (like Herdr/tmux) that do not
+    /// forward the Kitty keyboard protocol KeyRelease escape sequence.
+    pub fn tick(&mut self) {
+        let now = Instant::now();
+        // A typematic key repeat on Linux usually fires every 30-35ms.
+        // If 150ms elapse with no new event, the user has let go of the physical key.
+        let decay_timeout = Duration::from_millis(150);
+
+        let expired: Vec<(usize, usize)> = self
+            .active_coords
+            .iter()
+            .filter(|(_, last_seen)| now.duration_since(**last_seen) > decay_timeout)
+            .map(|(&coord, _)| coord)
+            .collect();
+
+        for (row, col) in expired {
+            self.release_coord(row, col);
         }
     }
 
@@ -48,9 +70,7 @@ impl App {
         match event.kind {
             KeyEventKind::Press => self.handle_key_press(event),
             KeyEventKind::Release => self.handle_key_release(event),
-            KeyEventKind::Repeat => {
-                // Ignore repeats to prevent re-triggering note on
-            }
+            KeyEventKind::Repeat => self.handle_key_repeat(event),
         }
     }
 
@@ -58,6 +78,10 @@ impl App {
         match event.code {
             KeyCode::Esc => {
                 self.should_quit = true;
+            }
+            KeyCode::Backspace | KeyCode::Delete => {
+                self.all_notes_off();
+                self.status_message = Some("All notes silenced".to_string());
             }
             KeyCode::Tab => {
                 self.layout_mode = self.layout_mode.next();
@@ -103,7 +127,6 @@ impl App {
             KeyCode::Char(' ') => {
                 self.sustain_enabled = !self.sustain_enabled;
                 if !self.sustain_enabled {
-                    // Release sustained notes that aren't physically held
                     self.release_sustained_notes();
                 }
                 self.status_message = Some(format!(
@@ -115,7 +138,7 @@ impl App {
                 if let Some((row, col)) = char_to_coord(c)
                     && let Some(note) = calculate_midi_note(row, col, self.root_note, self.layout_mode)
                 {
-                    self.active_coords.insert((row, col));
+                    self.active_coords.insert((row, col), Instant::now());
                     if !self.active_notes.contains(&note) {
                         let _ = self.midi.send_note_on(note, self.velocity);
                         self.active_notes.insert(note);
@@ -127,19 +150,32 @@ impl App {
         }
     }
 
+    fn handle_key_repeat(&mut self, event: KeyEvent) {
+        if let KeyCode::Char(c) = event.code
+            && let Some((row, col)) = char_to_coord(c)
+        {
+            // Update timestamp to keep the note active while key is held down
+            self.active_coords.insert((row, col), Instant::now());
+        }
+    }
+
     fn handle_key_release(&mut self, event: KeyEvent) {
         if let KeyCode::Char(c) = event.code
             && let Some((row, col)) = char_to_coord(c)
         {
-            self.active_coords.remove(&(row, col));
-            if let Some(note) = calculate_midi_note(row, col, self.root_note, self.layout_mode) {
-                if self.sustain_enabled {
-                    self.sustained_notes.insert(note);
-                } else {
-                    let _ = self.midi.send_note_off(note);
-                    self.active_notes.remove(&note);
-                    self.update_chord_detection();
-                }
+            self.release_coord(row, col);
+        }
+    }
+
+    fn release_coord(&mut self, row: usize, col: usize) {
+        self.active_coords.remove(&(row, col));
+        if let Some(note) = calculate_midi_note(row, col, self.root_note, self.layout_mode) {
+            if self.sustain_enabled {
+                self.sustained_notes.insert(note);
+            } else {
+                let _ = self.midi.send_note_off(note);
+                self.active_notes.remove(&note);
+                self.update_chord_detection();
             }
         }
     }
@@ -147,7 +183,7 @@ impl App {
     fn release_sustained_notes(&mut self) {
         let currently_held_notes: HashSet<u8> = self
             .active_coords
-            .iter()
+            .keys()
             .filter_map(|&(r, c)| calculate_midi_note(r, c, self.root_note, self.layout_mode))
             .collect();
 
