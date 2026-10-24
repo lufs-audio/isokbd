@@ -108,8 +108,10 @@ impl SynthEngine {
 
         let mut fifo: VecDeque<(f32, f32)> = VecDeque::with_capacity(4096);
         let mut current_notes: Vec<u8> = Vec::new();
+        let mut active_preset_notes: Vec<u8> = Vec::new();
         let mut muted = false;
         let mut volume = initial_volume;
+        let mut smoothed_gain = 0.0_f32;
 
         let stream_config: cpal::StreamConfig = default_config.into();
 
@@ -118,35 +120,36 @@ impl SynthEngine {
                 &stream_config,
                 move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
                     // 1. Process any incoming commands from the UI thread
-                    let mut needs_graph_update = false;
                     while let Some(cmd) = rx.try_pop() {
                         match cmd {
                             SynthCommand::Notes(notes) => {
                                 if current_notes != notes {
                                     current_notes = notes;
-                                    needs_graph_update = true;
+                                    if !current_notes.is_empty() && !muted {
+                                        active_preset_notes = current_notes.clone();
+                                        let code = generate_init_preset(&active_preset_notes, volume);
+                                        engine.update_with_code(&code);
+                                    }
                                 }
                             }
                             SynthCommand::Mute(new_muted) => {
                                 if muted != new_muted {
                                     muted = new_muted;
-                                    needs_graph_update = true;
+                                    if !muted && !current_notes.is_empty() {
+                                        active_preset_notes = current_notes.clone();
+                                        let code = generate_init_preset(&active_preset_notes, volume);
+                                        engine.update_with_code(&code);
+                                    }
                                 }
                             }
                             SynthCommand::Volume(new_vol) => {
                                 volume = new_vol;
-                                needs_graph_update = true;
+                                if !muted && !active_preset_notes.is_empty() {
+                                    let code = generate_init_preset(&active_preset_notes, volume);
+                                    engine.update_with_code(&code);
+                                }
                             }
                         }
-                    }
-
-                    if needs_graph_update {
-                        let code = if muted {
-                            "o: const_sig 0.0;".to_string()
-                        } else {
-                            generate_init_preset(&current_notes, volume)
-                        };
-                        engine.update_with_code(&code);
                     }
 
                     // 2. Calculate frames requested by CPAL
@@ -162,9 +165,25 @@ impl SynthEngine {
                         }
                     }
 
-                    // 4. Write FIFO audio frames into CPAL interleaved buffer
+                    // 4. Write FIFO audio frames into CPAL interleaved buffer with smooth envelope
+                    let target_gain = if muted || current_notes.is_empty() { 0.0_f32 } else { 1.0_f32 };
+
                     for i in 0..frames_needed {
-                        let (l, r) = fifo.pop_front().unwrap_or((0.0, 0.0));
+                        let (raw_l, raw_r) = fifo.pop_front().unwrap_or((0.0, 0.0));
+
+                        // Hexboard parity: 5ms attack, 250ms acoustic release tail ("damper fall")
+                        let coef = if target_gain > smoothed_gain { 0.008_f32 } else { 0.00035_f32 };
+                        smoothed_gain += (target_gain - smoothed_gain) * coef;
+
+                        if smoothed_gain < 0.0005 && (current_notes.is_empty() || muted) && !active_preset_notes.is_empty() {
+                            engine.update_with_code("o: const_sig 0.0;");
+                            active_preset_notes.clear();
+                            smoothed_gain = 0.0;
+                        }
+
+                        let l = raw_l * smoothed_gain;
+                        let r = raw_r * smoothed_gain;
+
                         if channels == 2 {
                             if let Some(s0) = data.get_mut(i * 2) {
                                 *s0 = l;

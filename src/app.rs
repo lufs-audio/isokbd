@@ -1,7 +1,6 @@
 //! Main application state, event handling, and inactivity decay loop.
 
-use std::collections::{BTreeSet, HashMap, HashSet};
-use std::time::{Duration, Instant};
+use std::collections::{BTreeSet, HashSet};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 use crate::layout::{calculate_midi_note, char_to_coord, LayoutMode};
@@ -13,8 +12,8 @@ pub struct App {
     pub layout_mode: LayoutMode,
     pub root_note: u8, // Base MIDI note for (row: 0, col: 0)
     pub velocity: u8,
-    pub sustain_enabled: bool,
-    pub active_coords: HashMap<(usize, usize), Instant>,
+    pub is_space_held: bool, // True while Space sustain pedal is physically depressed
+    pub active_coords: HashSet<(usize, usize)>,
     pub active_notes: BTreeSet<u8>,
     pub sustained_notes: HashSet<u8>,
     pub midi: MidiEngine,
@@ -27,11 +26,11 @@ pub struct App {
 impl App {
     pub fn new(midi: MidiEngine, synth: Option<SynthEngine>) -> Self {
         Self {
-            layout_mode: LayoutMode::AllFourths,
+            layout_mode: LayoutMode::WickiHayden,
             root_note: 48, // C3
             velocity: 100,
-            sustain_enabled: false,
-            active_coords: HashMap::new(),
+            is_space_held: false,
+            active_coords: HashSet::new(),
             active_notes: BTreeSet::new(),
             sustained_notes: HashSet::new(),
             midi,
@@ -42,27 +41,10 @@ impl App {
         }
     }
 
-    /// Periodic tick called every frame (~16ms).
-    /// Detects key releases in terminals or multiplexers that do not
-    /// forward the Kitty keyboard protocol KeyRelease escape sequence.
+    /// Periodic frame tick.
     pub fn tick(&mut self) {
-        let now = Instant::now();
-        // Fallback timeout for terminals or multiplexers that do not send KeyRelease events:
-        // Typematic initial repeat delay in Wayland/Hyprland is typically 250-300ms.
-        // We set the decay timeout to 320ms so a held key never gets cut off before
-        // the first repeat pulse arrives.
-        let decay_timeout = Duration::from_millis(320);
-
-        let expired: Vec<(usize, usize)> = self
-            .active_coords
-            .iter()
-            .filter(|(_, last_seen)| now.duration_since(**last_seen) > decay_timeout)
-            .map(|(&coord, _)| coord)
-            .collect();
-
-        for (row, col) in expired {
-            self.release_coord(row, col);
-        }
+        // No-op: true note lifecycles are driven by physical KeyRelease events
+        // rather than arbitrary timeout decay hacks.
     }
 
     pub fn handle_key_event(&mut self, event: KeyEvent) {
@@ -72,10 +54,15 @@ impl App {
             return;
         }
 
+        // Hexboard parity: ignore OS typematic auto-repeat completely so held notes never stutter!
+        if event.kind == KeyEventKind::Repeat {
+            return;
+        }
+
         match event.kind {
             KeyEventKind::Press => self.handle_key_press(event),
             KeyEventKind::Release => self.handle_key_release(event),
-            KeyEventKind::Repeat => self.handle_key_repeat(event),
+            KeyEventKind::Repeat => {}
         }
     }
 
@@ -132,14 +119,8 @@ impl App {
                 self.status_message = Some(format!("Velocity: {}", self.velocity));
             }
             KeyCode::Char(' ') => {
-                self.sustain_enabled = !self.sustain_enabled;
-                if !self.sustain_enabled {
-                    self.release_sustained_notes();
-                }
-                self.status_message = Some(format!(
-                    "Sustain: {}",
-                    if self.sustain_enabled { "ON" } else { "OFF" }
-                ));
+                self.is_space_held = true;
+                self.status_message = Some("Sustain Pedal: ENGAGED (Hold Space & tap notes)".to_string());
             }
             KeyCode::Enter => {
                 if let Some(ref mut s) = self.synth {
@@ -162,8 +143,8 @@ impl App {
                 if let Some((row, col)) = char_to_coord(c)
                     && let Some(note) = calculate_midi_note(row, col, self.root_note, self.layout_mode)
                 {
-                    self.active_coords.insert((row, col), Instant::now());
-                    if !self.active_notes.contains(&note) {
+                    let is_new_coord = self.active_coords.insert((row, col));
+                    if is_new_coord && !self.active_notes.contains(&note) {
                         let _ = self.midi.send_note_on(note, self.velocity);
                         self.active_notes.insert(note);
                         self.sync_synth_notes();
@@ -175,27 +156,26 @@ impl App {
         }
     }
 
-    fn handle_key_repeat(&mut self, event: KeyEvent) {
-        if let KeyCode::Char(c) = event.code
-            && let Some((row, col)) = char_to_coord(c)
-        {
-            // Update timestamp to keep the note active while key is held down
-            self.active_coords.insert((row, col), Instant::now());
-        }
-    }
-
     fn handle_key_release(&mut self, event: KeyEvent) {
-        if let KeyCode::Char(c) = event.code
-            && let Some((row, col)) = char_to_coord(c)
-        {
-            self.release_coord(row, col);
+        match event.code {
+            KeyCode::Char(' ') => {
+                self.is_space_held = false;
+                self.release_sustained_notes();
+                self.status_message = Some("Sustain Pedal: RELEASED".to_string());
+            }
+            KeyCode::Char(c) => {
+                if let Some((row, col)) = char_to_coord(c) {
+                    self.release_coord(row, col);
+                }
+            }
+            _ => {}
         }
     }
 
     fn release_coord(&mut self, row: usize, col: usize) {
         self.active_coords.remove(&(row, col));
         if let Some(note) = calculate_midi_note(row, col, self.root_note, self.layout_mode) {
-            if self.sustain_enabled {
+            if self.is_space_held {
                 self.sustained_notes.insert(note);
             } else {
                 let _ = self.midi.send_note_off(note);
@@ -209,7 +189,7 @@ impl App {
     fn release_sustained_notes(&mut self) {
         let currently_held_notes: HashSet<u8> = self
             .active_coords
-            .keys()
+            .iter()
             .filter_map(|&(r, c)| calculate_midi_note(r, c, self.root_note, self.layout_mode))
             .collect();
 
@@ -249,5 +229,106 @@ impl App {
     fn update_chord_detection(&mut self) {
         let notes_vec: Vec<u8> = self.active_notes.iter().copied().collect();
         self.detected_chord = detect_chord(&notes_vec);
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_momentary_sustain_pedal_stacking() {
+        let midi = MidiEngine::new().expect("Failed to create MIDI engine for test");
+        let mut app = App::new(midi, None);
+
+        // 1. Depress Spacebar (sustain pedal engaged)
+        app.handle_key_event(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+        assert!(app.is_space_held);
+
+        // 2. Tap 'z' (Row 0, Col 0: C3 = 48 in WickiHayden)
+        let key_z = KeyCode::Char('z');
+        app.handle_key_event(KeyEvent::new(key_z, KeyModifiers::NONE)); // press
+        assert!(app.active_notes.contains(&48));
+
+        app.handle_key_event(KeyEvent {
+            code: key_z,
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Release,
+            state: crossterm::event::KeyEventState::NONE,
+        });
+        // Key is physically released, BUT pedal is held, so note stays sounding!
+        assert!(app.active_notes.contains(&48));
+        assert!(app.sustained_notes.contains(&48));
+
+        // 3. Tap 'c' (Row 0, Col 2: E3 = 52 in WickiHayden)
+        let key_c = KeyCode::Char('c');
+        app.handle_key_event(KeyEvent::new(key_c, KeyModifiers::NONE)); // press
+        app.handle_key_event(KeyEvent {
+            code: key_c,
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Release,
+            state: crossterm::event::KeyEventState::NONE,
+        });
+        // Both notes stacked and ringing!
+        assert!(app.active_notes.contains(&48));
+        assert!(app.active_notes.contains(&52));
+        assert_eq!(app.active_notes.len(), 2);
+
+        // 4. Release Spacebar (pedal released)
+        app.handle_key_event(KeyEvent {
+            code: KeyCode::Char(' '),
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Release,
+            state: crossterm::event::KeyEventState::NONE,
+        });
+        assert!(!app.is_space_held);
+        // All sustained notes released!
+        assert!(app.active_notes.is_empty());
+        assert!(app.sustained_notes.is_empty());
+    }
+
+    #[test]
+    fn test_pedal_release_preserves_physically_held_keys() {
+        let midi = MidiEngine::new().expect("Failed to create MIDI engine for test");
+        let mut app = App::new(midi, None);
+
+        // Depress Spacebar
+        app.handle_key_event(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+
+        // Physically hold 'z'
+        let key_z = KeyCode::Char('z');
+        app.handle_key_event(KeyEvent::new(key_z, KeyModifiers::NONE));
+
+        // Tap and release 'c'
+        let key_c = KeyCode::Char('c');
+        app.handle_key_event(KeyEvent::new(key_c, KeyModifiers::NONE));
+        app.handle_key_event(KeyEvent {
+            code: key_c,
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Release,
+            state: crossterm::event::KeyEventState::NONE,
+        });
+
+        // Release pedal while 'z' is STILL physically held down
+        app.handle_key_event(KeyEvent {
+            code: KeyCode::Char(' '),
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Release,
+            state: crossterm::event::KeyEventState::NONE,
+        });
+
+        // 'c' was released so it dies, but 'z' is still held so it MUST keep sounding!
+        assert!(!app.active_notes.contains(&52));
+        assert!(app.active_notes.contains(&48));
+
+        // Now release 'z'
+        app.handle_key_event(KeyEvent {
+            code: key_z,
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Release,
+            state: crossterm::event::KeyEventState::NONE,
+        });
+        assert!(app.active_notes.is_empty());
     }
 }

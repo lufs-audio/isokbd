@@ -38,7 +38,7 @@ pub fn render(frame: &mut Frame, app: &App) {
 
 fn render_header(frame: &mut Frame, area: Rect, app: &App) {
     let root_str = note_to_name(app.root_note);
-    let sustain_color = if app.sustain_enabled {
+    let sustain_color = if app.is_space_held {
         Color::Green
     } else {
         Color::DarkGray
@@ -61,8 +61,8 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App) {
         Span::styled(format!("{root_str} ({})", app.root_note), Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
         Span::raw(" │ Vel: "),
         Span::styled(format!("{}", app.velocity), Style::default().fg(Color::White)),
-        Span::raw(" │ Sustain: "),
-        Span::styled(if app.sustain_enabled { "ON" } else { "OFF" }, Style::default().fg(sustain_color).add_modifier(Modifier::BOLD)),
+        Span::raw(" │ Pedal: "),
+        Span::styled(if app.is_space_held { "DOWN" } else { "UP" }, Style::default().fg(sustain_color).add_modifier(Modifier::BOLD)),
         Span::raw(" │ Synth: "),
         synth_span,
         Span::raw(" │ Port: "),
@@ -104,18 +104,25 @@ fn render_keyboard_grid(frame: &mut Frame, area: Rect, app: &App) {
         }
 
         for key in keys {
-            let is_active = app.active_coords.contains_key(&(row_idx, key.col));
+            let is_held = app.active_coords.contains(&(row_idx, key.col));
             let midi_note = calculate_midi_note(row_idx, key.col, app.root_note, app.layout_mode);
+            let is_sustained = midi_note.is_some_and(|n| app.sustained_notes.contains(&n));
             let note_str = midi_note.map(note_to_name).unwrap_or_else(|| "--".to_string());
 
             let is_root = midi_note.map(|n| n % 12 == app.root_note % 12).unwrap_or(false);
             let is_black_key = midi_note.map(|n| pitch_class_name(n).contains('#')).unwrap_or(false);
 
-            let style = if is_active {
-                // Key currently held
+            let style = if is_held {
+                // Key currently physically pressed
                 Style::default()
                     .fg(Color::Black)
                     .bg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
+            } else if is_sustained {
+                // Key ringing via sustain pedal
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Green)
                     .add_modifier(Modifier::BOLD)
             } else if is_root {
                 // Root note highlight
@@ -197,7 +204,7 @@ fn render_footer(frame: &mut Frame, area: Rect) {
         Span::styled(" [Tab] ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
         Span::raw("Layout  "),
         Span::styled(" [Space] ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-        Span::raw("Sustain  "),
+        Span::raw("Pedal (Hold)  "),
         Span::styled(" [Enter] ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
         Span::raw("Synth  "),
         Span::styled(" [PgUp/PgDn] ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
