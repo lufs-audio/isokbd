@@ -2,31 +2,70 @@
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LayoutMode {
-    /// Each row is a Perfect 4th (+5 semitones) above the row below it.
-    /// Columns advance by +1 semitone. Identical to bass/Chapman Stick.
+    /// Wicki-Hayden hexagonal layout (whole-tone East +2, fifth NE +7, fourth NW +5).
+    WickiHayden,
+    /// Tonnetz / Harmonic Table (major 3rd East +4, fifth NE +7, minor 3rd NW +3).
+    Tonnetz,
+    /// Gerhard (minor 3rd East +3, fifth NE +7, whole-tone NW +4).
+    Gerhard,
+    /// Fourths / Bass (fourth East +5, semitone NE +1).
     AllFourths,
     /// Traditional whole-tone alternating Jankó layout.
     Janko,
-    /// Harmonic table / Wicki-Hayden layout (whole steps horizontal, 4ths/5ths diagonal).
-    WickiHayden,
+    /// Piano Row (chromatic East +1, fourth NE +5).
+    PianoRow,
 }
 
 impl LayoutMode {
     #[must_use]
     pub const fn name(&self) -> &'static str {
         match self {
+            Self::WickiHayden => "Wicki-Hayden (Hex)",
+            Self::Tonnetz => "Tonnetz (Harmonic Table)",
+            Self::Gerhard => "Gerhard (Min3/5th)",
             Self::AllFourths => "All-4ths (Bass/Stick)",
             Self::Janko => "Jankó (Alternating)",
-            Self::WickiHayden => "Wicki-Hayden (Hex)",
+            Self::PianoRow => "Piano Row (Chromatic)",
+        }
+    }
+
+    /// Basis intervals: `(right, up_right)`.
+    /// `right`: semitones moving 1 step East (col + 1).
+    /// `up_right`: semitones moving 1 step North-East (row + 1, col + 1).
+    /// Up-Left is derived geometrically: `up_right - right`.
+    #[must_use]
+    pub const fn intervals(&self) -> (i32, i32) {
+        match self {
+            Self::WickiHayden => (2, 7),
+            Self::Tonnetz => (4, 7),
+            Self::Gerhard => (3, 7),
+            Self::AllFourths => (5, 1),
+            Self::Janko => (2, 1),
+            Self::PianoRow => (1, 5),
+        }
+    }
+
+    #[must_use]
+    pub const fn default_base(&self) -> u8 {
+        match self {
+            Self::WickiHayden => 41, // F2: places C3 directly on 'S' (Home row)
+            Self::Tonnetz => 36,     // C2: major-3rd across, 5th up-right
+            Self::Gerhard => 36,     // C2: minor-3rd across, 5th up-right
+            Self::AllFourths => 33,  // A1: 4ths across, semitone up-right
+            Self::Janko => 43,       // G2: whole-tone across, semitone up-right
+            Self::PianoRow => 45,    // A2: chromatic across, 4th up-right
         }
     }
 
     #[must_use]
     pub const fn next(&self) -> Self {
         match self {
+            Self::WickiHayden => Self::Tonnetz,
+            Self::Tonnetz => Self::Gerhard,
+            Self::Gerhard => Self::AllFourths,
             Self::AllFourths => Self::Janko,
-            Self::Janko => Self::WickiHayden,
-            Self::WickiHayden => Self::AllFourths,
+            Self::Janko => Self::PianoRow,
+            Self::PianoRow => Self::WickiHayden,
         }
     }
 }
@@ -105,7 +144,9 @@ pub const ALL_ROWS: [&[KeyDef]; 4] = [
     ROW_3_NUMBER,
 ];
 
-/// Calculates the MIDI note for a given row and column in the selected layout mode.
+/// Calculates the MIDI note for a given row and column in the selected layout mode
+/// using the two-basis interval formula derived from hexagonal lattice geometry:
+/// `note = root + (col * right) + (row * (up_right - right))`
 #[must_use]
 pub fn calculate_midi_note(
     row: usize,
@@ -113,33 +154,11 @@ pub fn calculate_midi_note(
     root_note: u8,
     mode: LayoutMode,
 ) -> Option<u8> {
-    let offset = match mode {
-        LayoutMode::AllFourths => {
-            let row_offset = (row as i32) * 5;
-            let col_offset = col as i32;
-            row_offset + col_offset
-        }
-        LayoutMode::Janko => {
-            // Alternating whole tone scales
-            let row_offset = match row {
-                0 => 0,
-                1 => 1,
-                2 => 12,
-                3 => 13,
-                _ => (row as i32) * 6,
-            };
-            let col_offset = (col as i32) * 2;
-            row_offset + col_offset
-        }
-        LayoutMode::WickiHayden => {
-            // Cols are whole steps (+2), rows step by 4ths (+5)
-            let row_offset = (row as i32) * 5;
-            let col_offset = (col as i32) * 2;
-            row_offset + col_offset
-        }
-    };
+    let (right, up_right) = mode.intervals();
+    let col_offset = (col as i32) * right;
+    let row_offset = (row as i32) * (up_right - right);
+    let total = i32::from(root_note) + col_offset + row_offset;
 
-    let total = i32::from(root_note) + offset;
     if (0..=127).contains(&total) {
         #[allow(clippy::cast_possible_truncation)]
         Some(total as u8)
@@ -166,22 +185,30 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_all_fourths_coordinates() {
-        // Root = C3 (48)
-        let root = 48;
-        // Bottom row Z (0, 0) should be C3 (48)
-        assert_eq!(calculate_midi_note(0, 0, root, LayoutMode::AllFourths), Some(48));
-        // Bottom row C (0, 2) should be D3 (50)
-        assert_eq!(calculate_midi_note(0, 2, root, LayoutMode::AllFourths), Some(50));
-        // Home row A (1, 0) should be F3 (48 + 5 = 53)
-        assert_eq!(calculate_midi_note(1, 0, root, LayoutMode::AllFourths), Some(53));
-        // Upper row Q (2, 0) should be Bb3 (48 + 10 = 58)
-        assert_eq!(calculate_midi_note(2, 0, root, LayoutMode::AllFourths), Some(58));
-        // Number row 1 (3, 0) should be Eb4 (48 + 15 = 63)
-        assert_eq!(calculate_midi_note(3, 0, root, LayoutMode::AllFourths), Some(63));
+    fn test_wicki_hayden_hexboard_parity() {
+        let root = LayoutMode::WickiHayden.default_base();
+        assert_eq!(root, 41);
 
-        // Up 2 rows, right 2 keys: (0,0) -> (2,2) should be exact octave (48 + 10 + 2 = 60 / C4)
-        assert_eq!(calculate_midi_note(2, 2, root, LayoutMode::AllFourths), Some(60));
+        // Bottom row Z (0, 0) is F2 (41)
+        assert_eq!(calculate_midi_note(0, 0, root, LayoutMode::WickiHayden), Some(41));
+
+        // HOME ROW:
+        // S (1, 1) is C3 (48) - The Tonic Anchor!
+        assert_eq!(calculate_midi_note(1, 1, root, LayoutMode::WickiHayden), Some(48));
+        // D (1, 2) is D3 (50)
+        assert_eq!(calculate_midi_note(1, 2, root, LayoutMode::WickiHayden), Some(50));
+        // F (1, 3) is E3 (52)
+        assert_eq!(calculate_midi_note(1, 3, root, LayoutMode::WickiHayden), Some(52));
+
+        // UPPER ROW:
+        // W (2, 1) is F3 (53)
+        assert_eq!(calculate_midi_note(2, 1, root, LayoutMode::WickiHayden), Some(53));
+        // E (2, 2) is G3 (55)
+        assert_eq!(calculate_midi_note(2, 2, root, LayoutMode::WickiHayden), Some(55));
+
+        // NUMBER ROW:
+        // 3 (3, 2) is C4 (60) - Octave!
+        assert_eq!(calculate_midi_note(3, 2, root, LayoutMode::WickiHayden), Some(60));
     }
 
     #[test]

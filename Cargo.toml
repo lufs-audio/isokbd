@@ -9,6 +9,10 @@ crossterm = "0.28"
 midir = "0.10"
 anyhow = "1.0"
 thiserror = "2.0"
+glicol = "0.13"
+cpal = "0.15"
+ringbuf = "0.4"
+log = "0.4"
 
 [lints.clippy]
 unwrap_used = "deny"

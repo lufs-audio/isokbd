@@ -28,6 +28,9 @@ It maps your standard QWERTY keyboard onto a staggered 2D musical matrix (All-4t
   - **Jankó (Alternating)**: Whole-tone scales alternating by half-steps.
   - **Wicki-Hayden (Harmonic Hex)**: Whole-steps horizontal, 4ths/5ths diagonal.
 - **Instant ALSA / PipeWire Routing**: Automatically connects to `Midi Through Port-0` (or creates a virtual port `isokbd`), immediately driving `rtrack`, `fluidsynth`, `scsynth`, or your DAW.
+- **Built-in Glicol Synthesizer**: Embedded, zero-dependency polyphonic synth powered by the `glicol` Rust audio engine and `cpal`. Features a 250ms smooth acoustic decay ("damper fall") and dynamic anti-clipping gain scaling right out of the box.
+- **Momentary Sustain Pedal**: Hold `Space` down like a physical piano pedal to tap-to-stack notes and build large chords, bypassing standard keyboard matrix ghosting. Releasing `Space` releases all sustained voices.
+- **Two-Basis Hex Lattice Engine**: Exact geometric parity with Hexboard, supporting Wicki-Hayden, Tonnetz, Gerhard, Fourths, Jankó, and Piano Row.
 - **Zero-Panic Rust**: Built with strict monadic error handling (`unwrap_used = "deny"`).
 
 ## Controls
@@ -35,21 +38,28 @@ It maps your standard QWERTY keyboard onto a staggered 2D musical matrix (All-4t
 | Key | Action |
 |---|---|
 | **Any QWERTY Key** | Play notes (polyphonic, illuminated on grid) |
+| **`Space` (Hold)** | **Sustain Pedal**: Hold down to tap-to-stack chords; release to damp |
+| **`Enter`** | Toggle Built-in Glicol Synth Mute (ON / OFF) |
+| **`Tab`** | Cycle layout mode (Wicki-Hayden $\rightarrow$ Tonnetz $\rightarrow$ Gerhard $\rightarrow$ Fourths $\rightarrow$ Jankó $\rightarrow$ Piano Row) |
 | **`↑` / `↓`** | Octave Up / Down ($\pm 12$ semitones) |
 | **`←` / `→`** | Transpose Root Up / Down ($\pm 1$ semitone) |
-| **`Tab`** | Switch layout mode (All-4ths $\rightarrow$ Jankó $\rightarrow$ Wicki-Hayden) |
-| **`Space`** | Toggle Sustain mode (ON / OFF) |
-| **`PgUp` / `PgDn`** | Adjust MIDI Velocity ($\pm 10$) |
+| **`PgUp` / `PgDn`** | Adjust MIDI Velocity and Synth Volume ($\pm 10$) |
 | **`Esc` or `Ctrl+C`** | Quit cleanly and reset all notes |
 
-## Playing Chords in All-4ths Mode
+## CLI Options
 
-Because every interval is geometric, your hand shapes **never change** when modulating:
-- **Major Triad**: Root (`Z`) + Major 3rd (`D`) + 5th (`H`)
-- **Minor Triad**: Root (`Z`) + Minor 3rd (`S`) + 5th (`H`)
-- **Octave**: Always **Up 2 rows, Right 2 keys** (e.g. `Z` $\rightarrow$ `E`)
-- **Minor 7th**: Always **Directly Up 2 rows** (e.g. `Z` $\rightarrow$ `Q`)
-- **Major 7th**: Always **Up 2 rows, Right 1 key** (e.g. `Z` $\rightarrow$ `W`)
+```bash
+isokbd               # Starts with both MIDI output and the built-in Glicol synth enabled
+isokbd --no-synth    # Starts in MIDI-only mode (internal audio engine disabled)
+```
+
+## Playing Chords in Wicki-Hayden Mode (Default)
+
+Wicki-Hayden arranges whole steps horizontally (`+2` semitones East) and fifths diagonally (`+7` semitones North-East):
+- **Major Triad**: Root (`Z` = C3) + Major 3rd (`C` = E3, 2 keys right) + 5th (`S` = G3, 1 key up-right)
+- **Minor Triad**: Root (`Z` = C3) + Minor 3rd (`A` = Eb3 / F3 depending on voicing) + 5th (`S` = G3)
+- **Octave**: Always **Up 2 rows, Right 1 key** (e.g. `Z` $\rightarrow$ `W` = C3 $\rightarrow$ C4)
+- **Sustain Stacking**: Hold **Space** down with your thumb, tap `Z`, tap `S`, tap `C`, tap `W` — all 4 notes stay ringing cleanly! Release **Space** to damp them all.
 
 ## License
 
