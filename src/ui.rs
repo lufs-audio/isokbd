@@ -44,6 +44,15 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App) {
         Color::DarkGray
     };
 
+    let synth_span = match app.synth.as_ref() {
+        Some(s) if s.is_muted() => Span::styled("MUTED", Style::default().fg(Color::Yellow)),
+        Some(s) => Span::styled(
+            format!("Glicol ({})", s.preset_name()),
+            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+        ),
+        None => Span::styled("OFF", Style::default().fg(Color::DarkGray)),
+    };
+
     let header_line = Line::from(vec![
         Span::styled(" ISOKBD ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
         Span::raw(" │ Mode: "),
@@ -54,6 +63,8 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App) {
         Span::styled(format!("{}", app.velocity), Style::default().fg(Color::White)),
         Span::raw(" │ Sustain: "),
         Span::styled(if app.sustain_enabled { "ON" } else { "OFF" }, Style::default().fg(sustain_color).add_modifier(Modifier::BOLD)),
+        Span::raw(" │ Synth: "),
+        synth_span,
         Span::raw(" │ Port: "),
         Span::styled(app.midi.port_name(), Style::default().fg(Color::Green)),
     ]);
@@ -157,6 +168,11 @@ fn render_chord_panel(frame: &mut Frame, area: Rect, app: &App) {
             Span::styled(notes_summary, Style::default().fg(Color::White)),
             if let Some(ref msg) = app.status_message {
                 Span::styled(format!("  •  {msg}"), Style::default().fg(Color::Cyan))
+            } else if let Some(ref s) = app.synth {
+                Span::styled(
+                    format!("  •  Audio Out: {}", s.device_name()),
+                    Style::default().fg(Color::DarkGray),
+                )
             } else {
                 Span::raw("")
             },
@@ -182,6 +198,8 @@ fn render_footer(frame: &mut Frame, area: Rect) {
         Span::raw("Layout  "),
         Span::styled(" [Space] ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
         Span::raw("Sustain  "),
+        Span::styled(" [Enter] ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Span::raw("Synth  "),
         Span::styled(" [PgUp/PgDn] ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
         Span::raw("Vel  "),
         Span::styled(" [Esc/Ctrl+C] ", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),

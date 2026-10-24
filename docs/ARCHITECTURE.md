@@ -10,17 +10,19 @@
  ┌─────────────────┐       ┌─────────────────┐       ┌────────────────────────┐
  │   Crossterm     │ ----> │    App State    │ ----> │  Ratatui TUI Renderer  │
  │  Event Stream   │       │ (Active Chords) │       │ (Illuminated 2D Grid)  │
- └─────────────────┘       └─────────────────┘       └────────────────────────┘
-                                    │
-                                    v
-                           ┌─────────────────┐
-                           │   MIDI Engine   │
-                           │ (`midir` / ALSA)│
-                           └─────────────────┘
+ └─────────────────┘       └────────┬────────┘       └────────────────────────┘
                                     │
                          ┌──────────┴──────────┐
+                         │                     │
                          v                     v
-                 [RTRACK_MIDI_IN]    [Midi Through Port-0]
+                ┌─────────────────┐   ┌────────────────────────┐
+                │   MIDI Engine   │   │  Synth Engine (Glicol) │
+                │ (`midir` / ALSA)│   │ (CPAL + Lock-Free RB)  │
+                └────────┬────────┘   └───────────┬────────────┘
+                         │                        │
+               ┌─────────┴─────────┐              v
+               v                   v        [Audio Out / DAC]
+       [RTRACK_MIDI_IN]    [Midi Through]  (Polyphonic Sine Init)
 ```
 
 ---
@@ -47,6 +49,12 @@
 - Multi-port real-time MIDI dispatcher using `midir`.
 - Automatically executes ALSA bridging (`aconnect`) to link `Midi Through` to `RTRACK_MIDI_IN`.
 - Broadcasts Note-On, Note-Off, and All-Notes-Off (CC 123) across all open port connections.
+
+### `src/synth.rs`
+- Built-in polyphonic synthesizer powered by the `glicol` graph engine and `cpal`.
+- Decoupled from the TUI event loop via a lock-free single-producer single-consumer (SPSC) ring buffer (`ringbuf`).
+- Implements a polyphonic "Sine Init" preset with $1/\sqrt{N}$ gain scaling across active notes to prevent digital clipping.
+- Real-time mute toggling via `Enter` or `--no-synth` CLI flag.
 
 ### `src/app.rs`
 - State manager holding `active_coords`, `active_notes`, `sustained_notes`, and chord metadata.

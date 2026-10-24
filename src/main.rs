@@ -3,6 +3,7 @@
 mod app;
 mod layout;
 mod midi;
+mod synth;
 mod theory;
 mod ui;
 
@@ -36,6 +37,21 @@ fn main() -> Result<()> {
     // Initialize MIDI Output
     let midi_engine = MidiEngine::new().context("Could not initialize MIDI engine")?;
 
+    // Check CLI flags for internal synthesizer
+    let args: Vec<String> = std::env::args().collect();
+    let disable_synth = args.iter().any(|a| a == "--no-synth" || a == "--midi-only");
+    let synth_engine = if disable_synth {
+        None
+    } else {
+        match synth::SynthEngine::new() {
+            Ok(engine) => Some(engine),
+            Err(e) => {
+                log::warn!("Could not initialize Glicol synth ({e}); defaulting to MIDI-only mode");
+                None
+            }
+        }
+    };
+
     // Initialize terminal in raw mode with full keyboard enhancements
     // (REPORT_ALL_KEYS_AS_ESCAPE_CODES enables KeyRelease and Repeat events for text keys)
     enable_raw_mode().context("Failed to enable terminal raw mode")?;
@@ -52,7 +68,7 @@ fn main() -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend).context("Failed to create Ratatui terminal")?;
 
-    let mut app = App::new(midi_engine);
+    let mut app = App::new(midi_engine, synth_engine);
     let tick_rate = Duration::from_millis(16); // ~60 FPS update rate
 
     while !app.should_quit {

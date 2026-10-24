@@ -28,6 +28,7 @@ It maps your standard QWERTY keyboard onto a staggered 2D musical matrix (All-4t
   - **Jankó (Alternating)**: Whole-tone scales alternating by half-steps.
   - **Wicki-Hayden (Harmonic Hex)**: Whole-steps horizontal, 4ths/5ths diagonal.
 - **Instant ALSA / PipeWire Routing**: Automatically connects to `Midi Through Port-0` (or creates a virtual port `isokbd`), immediately driving `rtrack`, `fluidsynth`, `scsynth`, or your DAW.
+- **Built-in Glicol Synthesizer**: Includes an embedded, zero-dependency polyphonic synth powered by the `glicol` Rust audio engine and `cpal`. Plays a pure "Sine Init" patch with dynamic anti-clipping gain scaling right out of the box.
 - **Zero-Panic Rust**: Built with strict monadic error handling (`unwrap_used = "deny"`).
 
 ## Controls
@@ -39,8 +40,16 @@ It maps your standard QWERTY keyboard onto a staggered 2D musical matrix (All-4t
 | **`←` / `→`** | Transpose Root Up / Down ($\pm 1$ semitone) |
 | **`Tab`** | Switch layout mode (All-4ths $\rightarrow$ Jankó $\rightarrow$ Wicki-Hayden) |
 | **`Space`** | Toggle Sustain mode (ON / OFF) |
-| **`PgUp` / `PgDn`** | Adjust MIDI Velocity ($\pm 10$) |
+| **`Enter`** | Toggle Built-in Glicol Synth Mute (ON / OFF) |
+| **`PgUp` / `PgDn`** | Adjust MIDI Velocity and Synth Volume ($\pm 10$) |
 | **`Esc` or `Ctrl+C`** | Quit cleanly and reset all notes |
+
+## CLI Options
+
+```bash
+isokbd               # Starts with both MIDI output and the built-in Glicol synth enabled
+isokbd --no-synth    # Starts in MIDI-only mode (internal audio engine disabled)
+```
 
 ## Playing Chords in All-4ths Mode
 

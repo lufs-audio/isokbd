@@ -6,6 +6,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 use crate::layout::{calculate_midi_note, char_to_coord, LayoutMode};
 use crate::midi::MidiEngine;
+use crate::synth::SynthEngine;
 use crate::theory::{detect_chord, note_to_name};
 
 pub struct App {
@@ -17,13 +18,14 @@ pub struct App {
     pub active_notes: BTreeSet<u8>,
     pub sustained_notes: HashSet<u8>,
     pub midi: MidiEngine,
+    pub synth: Option<SynthEngine>,
     pub detected_chord: Option<String>,
     pub status_message: Option<String>,
     pub should_quit: bool,
 }
 
 impl App {
-    pub fn new(midi: MidiEngine) -> Self {
+    pub fn new(midi: MidiEngine, synth: Option<SynthEngine>) -> Self {
         Self {
             layout_mode: LayoutMode::AllFourths,
             root_note: 48, // C3
@@ -33,6 +35,7 @@ impl App {
             active_notes: BTreeSet::new(),
             sustained_notes: HashSet::new(),
             midi,
+            synth,
             detected_chord: None,
             status_message: None,
             should_quit: false,
@@ -120,10 +123,12 @@ impl App {
             }
             KeyCode::PageUp => {
                 self.velocity = (self.velocity + 10).min(127);
+                self.sync_synth_volume();
                 self.status_message = Some(format!("Velocity: {}", self.velocity));
             }
             KeyCode::PageDown => {
                 self.velocity = self.velocity.saturating_sub(10).max(10);
+                self.sync_synth_volume();
                 self.status_message = Some(format!("Velocity: {}", self.velocity));
             }
             KeyCode::Char(' ') => {
@@ -136,6 +141,23 @@ impl App {
                     if self.sustain_enabled { "ON" } else { "OFF" }
                 ));
             }
+            KeyCode::Enter => {
+                if let Some(ref mut s) = self.synth {
+                    match s.toggle_mute() {
+                        Ok(muted) => {
+                            self.status_message = Some(format!(
+                                "Internal Synth: {}",
+                                if muted { "MUTED" } else { "ACTIVE (Sine Init)" }
+                            ));
+                        }
+                        Err(e) => {
+                            self.status_message = Some(format!("Synth error: {e}"));
+                        }
+                    }
+                } else {
+                    self.status_message = Some("Internal synth not active (MIDI-only mode)".to_string());
+                }
+            }
             KeyCode::Char(c) => {
                 if let Some((row, col)) = char_to_coord(c)
                     && let Some(note) = calculate_midi_note(row, col, self.root_note, self.layout_mode)
@@ -144,6 +166,7 @@ impl App {
                     if !self.active_notes.contains(&note) {
                         let _ = self.midi.send_note_on(note, self.velocity);
                         self.active_notes.insert(note);
+                        self.sync_synth_notes();
                         self.update_chord_detection();
                     }
                 }
@@ -177,6 +200,7 @@ impl App {
             } else {
                 let _ = self.midi.send_note_off(note);
                 self.active_notes.remove(&note);
+                self.sync_synth_notes();
                 self.update_chord_detection();
             }
         }
@@ -195,6 +219,7 @@ impl App {
                 self.active_notes.remove(&note);
             }
         }
+        self.sync_synth_notes();
         self.update_chord_detection();
     }
 
@@ -204,6 +229,21 @@ impl App {
         self.active_notes.clear();
         self.sustained_notes.clear();
         self.detected_chord = None;
+        self.sync_synth_notes();
+    }
+
+    fn sync_synth_notes(&mut self) {
+        if let Some(ref mut s) = self.synth {
+            let notes: Vec<u8> = self.active_notes.iter().copied().collect();
+            let _ = s.set_notes(notes);
+        }
+    }
+
+    fn sync_synth_volume(&mut self) {
+        if let Some(ref mut s) = self.synth {
+            let scaled_vol = (f32::from(self.velocity) / 127.0) * 0.45;
+            let _ = s.set_volume(scaled_vol);
+        }
     }
 
     fn update_chord_detection(&mut self) {
