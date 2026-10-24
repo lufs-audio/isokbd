@@ -25,9 +25,10 @@ pub struct App {
 
 impl App {
     pub fn new(midi: MidiEngine, synth: Option<SynthEngine>) -> Self {
+        let initial_layout = LayoutMode::WickiHayden;
         Self {
-            layout_mode: LayoutMode::WickiHayden,
-            root_note: 48, // C3
+            layout_mode: initial_layout,
+            root_note: initial_layout.default_base(), // 41 (F2), placing C3 on Home-row 'S'
             velocity: 100,
             is_space_held: false,
             active_coords: HashSet::new(),
@@ -77,6 +78,7 @@ impl App {
             }
             KeyCode::Tab => {
                 self.layout_mode = self.layout_mode.next();
+                self.root_note = self.layout_mode.default_base();
                 self.all_notes_off();
                 self.status_message = Some(format!("Switched layout to {}", self.layout_mode.name()));
             }
@@ -146,8 +148,10 @@ impl App {
                     let is_new_coord = self.active_coords.insert((row, col));
                     if is_new_coord && !self.active_notes.contains(&note) {
                         let _ = self.midi.send_note_on(note, self.velocity);
+                        if let Some(ref mut s) = self.synth {
+                            let _ = s.note_on(note, self.velocity);
+                        }
                         self.active_notes.insert(note);
-                        self.sync_synth_notes();
                         self.update_chord_detection();
                     }
                 }
@@ -179,8 +183,10 @@ impl App {
                 self.sustained_notes.insert(note);
             } else {
                 let _ = self.midi.send_note_off(note);
+                if let Some(ref mut s) = self.synth {
+                    let _ = s.note_off(note);
+                }
                 self.active_notes.remove(&note);
-                self.sync_synth_notes();
                 self.update_chord_detection();
             }
         }
@@ -196,27 +202,24 @@ impl App {
         for note in self.sustained_notes.drain() {
             if !currently_held_notes.contains(&note) {
                 let _ = self.midi.send_note_off(note);
+                if let Some(ref mut s) = self.synth {
+                    let _ = s.note_off(note);
+                }
                 self.active_notes.remove(&note);
             }
         }
-        self.sync_synth_notes();
         self.update_chord_detection();
     }
 
     pub fn all_notes_off(&mut self) {
         let _ = self.midi.all_notes_off();
+        if let Some(ref mut s) = self.synth {
+            let _ = s.all_notes_off();
+        }
         self.active_coords.clear();
         self.active_notes.clear();
         self.sustained_notes.clear();
         self.detected_chord = None;
-        self.sync_synth_notes();
-    }
-
-    fn sync_synth_notes(&mut self) {
-        if let Some(ref mut s) = self.synth {
-            let notes: Vec<u8> = self.active_notes.iter().copied().collect();
-            let _ = s.set_notes(notes);
-        }
     }
 
     fn sync_synth_volume(&mut self) {
@@ -246,13 +249,13 @@ mod tests {
         app.handle_key_event(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
         assert!(app.is_space_held);
 
-        // 2. Tap 'z' (Row 0, Col 0: C3 = 48 in WickiHayden)
-        let key_z = KeyCode::Char('z');
-        app.handle_key_event(KeyEvent::new(key_z, KeyModifiers::NONE)); // press
+        // 2. Tap 's' (Row 1, Col 1: C3 = 48 in WickiHayden with base 41)
+        let key_s = KeyCode::Char('s');
+        app.handle_key_event(KeyEvent::new(key_s, KeyModifiers::NONE)); // press
         assert!(app.active_notes.contains(&48));
 
         app.handle_key_event(KeyEvent {
-            code: key_z,
+            code: key_s,
             modifiers: KeyModifiers::NONE,
             kind: KeyEventKind::Release,
             state: crossterm::event::KeyEventState::NONE,
@@ -261,11 +264,11 @@ mod tests {
         assert!(app.active_notes.contains(&48));
         assert!(app.sustained_notes.contains(&48));
 
-        // 3. Tap 'c' (Row 0, Col 2: E3 = 52 in WickiHayden)
-        let key_c = KeyCode::Char('c');
-        app.handle_key_event(KeyEvent::new(key_c, KeyModifiers::NONE)); // press
+        // 3. Tap 'f' (Row 1, Col 3: E3 = 52 in WickiHayden)
+        let key_f = KeyCode::Char('f');
+        app.handle_key_event(KeyEvent::new(key_f, KeyModifiers::NONE)); // press
         app.handle_key_event(KeyEvent {
-            code: key_c,
+            code: key_f,
             modifiers: KeyModifiers::NONE,
             kind: KeyEventKind::Release,
             state: crossterm::event::KeyEventState::NONE,
@@ -296,21 +299,21 @@ mod tests {
         // Depress Spacebar
         app.handle_key_event(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
 
-        // Physically hold 'z'
-        let key_z = KeyCode::Char('z');
-        app.handle_key_event(KeyEvent::new(key_z, KeyModifiers::NONE));
+        // Physically hold 's' (C3 = 48)
+        let key_s = KeyCode::Char('s');
+        app.handle_key_event(KeyEvent::new(key_s, KeyModifiers::NONE));
 
-        // Tap and release 'c'
-        let key_c = KeyCode::Char('c');
-        app.handle_key_event(KeyEvent::new(key_c, KeyModifiers::NONE));
+        // Tap and release 'f' (E3 = 52)
+        let key_f = KeyCode::Char('f');
+        app.handle_key_event(KeyEvent::new(key_f, KeyModifiers::NONE));
         app.handle_key_event(KeyEvent {
-            code: key_c,
+            code: key_f,
             modifiers: KeyModifiers::NONE,
             kind: KeyEventKind::Release,
             state: crossterm::event::KeyEventState::NONE,
         });
 
-        // Release pedal while 'z' is STILL physically held down
+        // Release pedal while 's' is STILL physically held down
         app.handle_key_event(KeyEvent {
             code: KeyCode::Char(' '),
             modifiers: KeyModifiers::NONE,
@@ -318,13 +321,13 @@ mod tests {
             state: crossterm::event::KeyEventState::NONE,
         });
 
-        // 'c' was released so it dies, but 'z' is still held so it MUST keep sounding!
+        // 'f' was released so it dies, but 's' is still held so it MUST keep sounding!
         assert!(!app.active_notes.contains(&52));
         assert!(app.active_notes.contains(&48));
 
-        // Now release 'z'
+        // Now release 's'
         app.handle_key_event(KeyEvent {
-            code: key_z,
+            code: key_s,
             modifiers: KeyModifiers::NONE,
             kind: KeyEventKind::Release,
             state: crossterm::event::KeyEventState::NONE,

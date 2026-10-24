@@ -46,6 +46,18 @@ impl LayoutMode {
     }
 
     #[must_use]
+    pub const fn default_base(&self) -> u8 {
+        match self {
+            Self::WickiHayden => 41, // F2: places C3 directly on 'S' (Home row)
+            Self::Tonnetz => 36,     // C2: major-3rd across, 5th up-right
+            Self::Gerhard => 36,     // C2: minor-3rd across, 5th up-right
+            Self::AllFourths => 33,  // A1: 4ths across, semitone up-right
+            Self::Janko => 43,       // G2: whole-tone across, semitone up-right
+            Self::PianoRow => 45,    // A2: chromatic across, 4th up-right
+        }
+    }
+
+    #[must_use]
     pub const fn next(&self) -> Self {
         match self {
             Self::WickiHayden => Self::Tonnetz,
@@ -173,21 +185,30 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_wicki_hayden_intervals() {
-        // Root = C3 (48)
-        let root = 48;
-        // Bottom row Z (0, 0) is Root (48 = C3)
-        assert_eq!(calculate_midi_note(0, 0, root, LayoutMode::WickiHayden), Some(48));
-        // East: X (0, 1) is +2 (50 = D3)
-        assert_eq!(calculate_midi_note(0, 1, root, LayoutMode::WickiHayden), Some(50));
-        // East x2: C (0, 2) is +4 (52 = E3, Major 3rd!)
-        assert_eq!(calculate_midi_note(0, 2, root, LayoutMode::WickiHayden), Some(52));
-        // Up-Left: A (1, 0) is +5 (53 = F3, Perfect 4th!)
-        assert_eq!(calculate_midi_note(1, 0, root, LayoutMode::WickiHayden), Some(53));
-        // Up-Right: S (1, 1) is +7 (55 = G3, Perfect 5th!)
-        assert_eq!(calculate_midi_note(1, 1, root, LayoutMode::WickiHayden), Some(55));
-        // Octave: W (2, 1) is Up 2 rows, Right 1 col = +12 (60 = C4, Octave!)
-        assert_eq!(calculate_midi_note(2, 1, root, LayoutMode::WickiHayden), Some(60));
+    fn test_wicki_hayden_hexboard_parity() {
+        let root = LayoutMode::WickiHayden.default_base();
+        assert_eq!(root, 41);
+
+        // Bottom row Z (0, 0) is F2 (41)
+        assert_eq!(calculate_midi_note(0, 0, root, LayoutMode::WickiHayden), Some(41));
+
+        // HOME ROW:
+        // S (1, 1) is C3 (48) - The Tonic Anchor!
+        assert_eq!(calculate_midi_note(1, 1, root, LayoutMode::WickiHayden), Some(48));
+        // D (1, 2) is D3 (50)
+        assert_eq!(calculate_midi_note(1, 2, root, LayoutMode::WickiHayden), Some(50));
+        // F (1, 3) is E3 (52)
+        assert_eq!(calculate_midi_note(1, 3, root, LayoutMode::WickiHayden), Some(52));
+
+        // UPPER ROW:
+        // W (2, 1) is F3 (53)
+        assert_eq!(calculate_midi_note(2, 1, root, LayoutMode::WickiHayden), Some(53));
+        // E (2, 2) is G3 (55)
+        assert_eq!(calculate_midi_note(2, 2, root, LayoutMode::WickiHayden), Some(55));
+
+        // NUMBER ROW:
+        // 3 (3, 2) is C4 (60) - Octave!
+        assert_eq!(calculate_midi_note(3, 2, root, LayoutMode::WickiHayden), Some(60));
     }
 
     #[test]

@@ -1,11 +1,11 @@
-//! Built-in polyphonic synthesizer backend powered by Glicol and CPAL.
+//! Built-in polyphonic synthesizer backend powered by CPAL with sample-accurate DSP.
 
-use std::collections::VecDeque;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use glicol::Engine;
 use ringbuf::traits::{Consumer, Producer, Split};
 use ringbuf::HeapRb;
 use thiserror::Error;
+
+pub const MAX_VOICES: usize = 16;
 
 #[derive(Debug, Error)]
 pub enum SynthError {
@@ -21,52 +21,23 @@ pub enum SynthError {
     BufferFull,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum SynthCommand {
-    Notes(Vec<u8>),
+    NoteOn { note: u8, velocity: u8 },
+    NoteOff { note: u8 },
+    AllNotesOff,
     Mute(bool),
     Volume(f32),
 }
 
-/// Generates a Glicol script representing an "init" polyphonic sine wave patch.
-///
-/// When `notes` is empty, outputs silence (`o: const_sig 0.0;`).
-/// When notes are active, each note gets its own sine oscillator scaled by `1 / sqrt(N)`
-/// to preserve perceived volume and prevent clipping, summed into the stereo output `o`.
-#[must_use]
-pub fn generate_init_preset(notes: &[u8], master_volume: f32) -> String {
-    if notes.is_empty() {
-        return "o: const_sig 0.0;".to_string();
-    }
-
-    let num_notes = notes.len().max(1) as f32;
-    // Scale per-voice amplitude inversely with sqrt(N) to prevent clipping
-    let voice_gain = (master_volume / num_notes.sqrt()).min(0.5);
-
-    let mut code = String::with_capacity(notes.len() * 48 + 32);
-    let mut voice_names = Vec::with_capacity(notes.len());
-
-    for (i, &note) in notes.iter().enumerate() {
-        // Equal temperament (12-TET) frequency calculation
-        let freq = 440.0 * 2.0_f32.powf((f32::from(note) - 69.0) / 12.0);
-        let v_name = format!("~v{i}");
-        code.push_str(&format!("{v_name}: sin {freq:.2} >> mul {voice_gain:.4};\n"));
-        voice_names.push(v_name);
-    }
-
-    if voice_names.len() == 1 {
-        if let Some(v0) = voice_names.first() {
-            code.push_str(&format!("o: {v0};\n"));
-        }
-    } else if let Some((first, rest)) = voice_names.split_first() {
-        code.push_str(&format!("o: {first}"));
-        for v in rest {
-            code.push_str(&format!(" >> add {v}"));
-        }
-        code.push_str(";\n");
-    }
-
-    code
+#[derive(Debug, Clone, Copy, Default)]
+struct Voice {
+    note: u8,
+    freq: f32,
+    phase: f32,
+    gain: f32,
+    target_gain: f32,
+    active: bool,
 }
 
 pub type SynthProd = <HeapRb<SynthCommand> as Split>::Prod;
@@ -80,7 +51,7 @@ pub struct SynthEngine {
 }
 
 impl SynthEngine {
-    /// Attempts to initialize the default audio output device and start the Glicol synth stream.
+    /// Attempts to initialize the default audio output device and start the polyphonic synth stream.
     pub fn new() -> Result<Self, SynthError> {
         let host = cpal::default_host();
         let device = host
@@ -95,23 +66,16 @@ impl SynthEngine {
             .default_output_config()
             .map_err(|e| SynthError::DefaultConfigError(e.to_string()))?;
 
-        let sample_rate = default_config.sample_rate().0;
+        let sample_rate = default_config.sample_rate().0 as f32;
         let channels = default_config.channels() as usize;
 
-        let rb = HeapRb::<SynthCommand>::new(64);
+        let rb = HeapRb::<SynthCommand>::new(128);
         let (tx, mut rx) = rb.split();
 
-        let initial_volume = 0.35_f32;
-        let mut engine = Engine::<128>::new();
-        engine.set_sr(sample_rate as usize);
-        engine.update_with_code("o: const_sig 0.0;");
-
-        let mut fifo: VecDeque<(f32, f32)> = VecDeque::with_capacity(4096);
-        let mut current_notes: Vec<u8> = Vec::new();
-        let mut active_preset_notes: Vec<u8> = Vec::new();
+        let initial_volume = 0.50_f32;
+        let mut voices = [Voice::default(); MAX_VOICES];
         let mut muted = false;
         let mut volume = initial_volume;
-        let mut smoothed_gain = 0.0_f32;
 
         let stream_config: cpal::StreamConfig = default_config.into();
 
@@ -119,88 +83,125 @@ impl SynthEngine {
             .build_output_stream(
                 &stream_config,
                 move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-                    // 1. Process any incoming commands from the UI thread
+                    // 1. Process discrete note on / note off / volume commands
                     while let Some(cmd) = rx.try_pop() {
                         match cmd {
-                            SynthCommand::Notes(notes) => {
-                                if current_notes != notes {
-                                    current_notes = notes;
-                                    if !current_notes.is_empty() && !muted {
-                                        active_preset_notes = current_notes.clone();
-                                        let code = generate_init_preset(&active_preset_notes, volume);
-                                        engine.update_with_code(&code);
+                            SynthCommand::NoteOn { note, velocity } => {
+                                // 12-TET frequency formula: f = 440 * 2^((note - 69)/12)
+                                let freq = 440.0 * 2.0_f32.powf((f32::from(note) - 69.0) / 12.0);
+                                let vel_gain = (f32::from(velocity) / 127.0) * volume * 0.30;
+
+                                // Re-trigger voice if note already ringing
+                                let mut assigned = false;
+                                for v in &mut voices {
+                                    if v.active && v.note == note {
+                                        v.freq = freq;
+                                        v.target_gain = vel_gain;
+                                        assigned = true;
+                                        break;
                                     }
+                                }
+
+                                if !assigned {
+                                    // Allocate free voice slot
+                                    for v in &mut voices {
+                                        if !v.active {
+                                            v.note = note;
+                                            v.freq = freq;
+                                            v.target_gain = vel_gain;
+                                            v.active = true;
+                                            assigned = true;
+                                            break;
+                                        }
+                                    }
+                                }
+
+                                if !assigned {
+                                    // Voice stealing: reallocate the voice closest to silence
+                                    let mut lowest_idx = 0;
+                                    let mut lowest_gain = f32::MAX;
+                                    for (idx, v) in voices.iter().enumerate() {
+                                        if v.gain < lowest_gain {
+                                            lowest_gain = v.gain;
+                                            lowest_idx = idx;
+                                        }
+                                    }
+                                    if let Some(v) = voices.get_mut(lowest_idx) {
+                                        v.note = note;
+                                        v.freq = freq;
+                                        v.target_gain = vel_gain;
+                                        v.active = true;
+                                    }
+                                }
+                            }
+                            SynthCommand::NoteOff { note } => {
+                                for v in &mut voices {
+                                    if v.active && v.note == note {
+                                        v.target_gain = 0.0;
+                                    }
+                                }
+                            }
+                            SynthCommand::AllNotesOff => {
+                                for v in &mut voices {
+                                    v.target_gain = 0.0;
                                 }
                             }
                             SynthCommand::Mute(new_muted) => {
-                                if muted != new_muted {
-                                    muted = new_muted;
-                                    if !muted && !current_notes.is_empty() {
-                                        active_preset_notes = current_notes.clone();
-                                        let code = generate_init_preset(&active_preset_notes, volume);
-                                        engine.update_with_code(&code);
-                                    }
-                                }
+                                muted = new_muted;
                             }
                             SynthCommand::Volume(new_vol) => {
                                 volume = new_vol;
-                                if !muted && !active_preset_notes.is_empty() {
-                                    let code = generate_init_preset(&active_preset_notes, volume);
-                                    engine.update_with_code(&code);
-                                }
                             }
                         }
                     }
 
-                    // 2. Calculate frames requested by CPAL
+                    // 2. Synthesize audio frames directly with per-voice acoustic damper fall
                     let frames_needed = data.len().checked_div(channels).unwrap_or(0);
 
-                    // 3. Fill FIFO buffer from Glicol engine blocks of 128 samples
-                    while fifo.len() < frames_needed {
-                        let (buffers, _) = engine.next_block(vec![]);
-                        for k in 0..128 {
-                            let left = buffers.first().and_then(|b| b.get(k)).copied().unwrap_or(0.0);
-                            let right = buffers.get(1).and_then(|b| b.get(k)).copied().unwrap_or(left);
-                            fifo.push_back((left, right));
-                        }
-                    }
-
-                    // 4. Write FIFO audio frames into CPAL interleaved buffer with smooth envelope
-                    let target_gain = if muted || current_notes.is_empty() { 0.0_f32 } else { 1.0_f32 };
-
                     for i in 0..frames_needed {
-                        let (raw_l, raw_r) = fifo.pop_front().unwrap_or((0.0, 0.0));
+                        let mut frame_sum = 0.0_f32;
 
-                        // Hexboard parity: 5ms attack, 250ms acoustic release tail ("damper fall")
-                        let coef = if target_gain > smoothed_gain { 0.008_f32 } else { 0.00035_f32 };
-                        smoothed_gain += (target_gain - smoothed_gain) * coef;
+                        for v in &mut voices {
+                            if !v.active {
+                                continue;
+                            }
 
-                        if smoothed_gain < 0.0005 && (current_notes.is_empty() || muted) && !active_preset_notes.is_empty() {
-                            engine.update_with_code("o: const_sig 0.0;");
-                            active_preset_notes.clear();
-                            smoothed_gain = 0.0;
+                            // Hexboard parity: snappy 5ms attack, 250ms acoustic release tail ("damper fall")
+                            let coef = if v.target_gain > v.gain { 0.012_f32 } else { 0.0007_f32 };
+                            v.gain += (v.target_gain - v.gain) * coef;
+
+                            if v.gain < 0.0001 && v.target_gain == 0.0 {
+                                v.active = false;
+                                v.gain = 0.0;
+                                continue;
+                            }
+
+                            frame_sum += (v.phase * 2.0 * std::f32::consts::PI).sin() * v.gain;
+                            v.phase += v.freq / sample_rate;
+                            if v.phase >= 1.0 {
+                                v.phase -= 1.0;
+                            }
                         }
 
-                        let l = raw_l * smoothed_gain;
-                        let r = raw_r * smoothed_gain;
+                        let out_sample = if muted { 0.0 } else { frame_sum.clamp(-1.0, 1.0) };
 
                         if channels == 2 {
                             if let Some(s0) = data.get_mut(i * 2) {
-                                *s0 = l;
+                                *s0 = out_sample;
                             }
                             if let Some(s1) = data.get_mut(i * 2 + 1) {
-                                *s1 = r;
+                                *s1 = out_sample;
                             }
                         } else if channels == 1 {
                             if let Some(s0) = data.get_mut(i) {
-                                *s0 = (l + r) * 0.5;
+                                *s0 = out_sample;
                             }
                         } else {
                             if let Some(s0) = data.get_mut(i * channels) {
-                                *s0 = l;
+                                *s0 = out_sample;
                             }
                             if let Some(s1) = data.get_mut(i * channels + 1) {
-                                *s1 = r;
+                                *s1 = out_sample;
                             }
                             for c in 2..channels {
                                 if let Some(sc) = data.get_mut(i * channels + c) {
@@ -230,10 +231,24 @@ impl SynthEngine {
         })
     }
 
-    /// Sends the current list of active MIDI notes to the synth.
-    pub fn set_notes(&mut self, notes: Vec<u8>) -> Result<(), SynthError> {
+    /// Triggers a note on event with velocity.
+    pub fn note_on(&mut self, note: u8, velocity: u8) -> Result<(), SynthError> {
         self.tx
-            .try_push(SynthCommand::Notes(notes))
+            .try_push(SynthCommand::NoteOn { note, velocity })
+            .map_err(|_| SynthError::BufferFull)
+    }
+
+    /// Triggers a note off event for a specific note.
+    pub fn note_off(&mut self, note: u8) -> Result<(), SynthError> {
+        self.tx
+            .try_push(SynthCommand::NoteOff { note })
+            .map_err(|_| SynthError::BufferFull)
+    }
+
+    /// Releases all ringing notes with acoustic damper decay.
+    pub fn all_notes_off(&mut self) -> Result<(), SynthError> {
+        self.tx
+            .try_push(SynthCommand::AllNotesOff)
             .map_err(|_| SynthError::BufferFull)
     }
 
@@ -278,7 +293,7 @@ impl SynthEngine {
 
     #[must_use]
     pub const fn preset_name(&self) -> &'static str {
-        "Sine Init"
+        "Poly Sine"
     }
 }
 
@@ -288,51 +303,58 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_empty_notes_generates_silence() {
-        let code = generate_init_preset(&[], 0.35);
-        assert_eq!(code, "o: const_sig 0.0;");
+    fn test_frequency_calculation() {
+        // A4 = MIDI 69 = 440.0 Hz
+        let freq_a4 = 440.0 * 2.0_f32.powf((69.0 - 69.0) / 12.0);
+        assert!((freq_a4 - 440.0).abs() < 1e-3);
 
-        let mut engine = Engine::<128>::new();
-        engine.update_with_code(&code);
-        let (buffers, _) = engine.next_block(vec![]);
-        let sum: f32 = buffers[0].iter().sum();
-        assert_eq!(sum, 0.0);
+        // A3 = MIDI 57 = 220.0 Hz
+        let freq_a3 = 440.0 * 2.0_f32.powf((57.0 - 69.0) / 12.0);
+        assert!((freq_a3 - 220.0).abs() < 1e-3);
+
+        // C4 (Middle C) = MIDI 60 ≈ 261.6256 Hz
+        let freq_c4 = 440.0 * 2.0_f32.powf((60.0 - 69.0) / 12.0);
+        assert!((freq_c4 - 261.6256).abs() < 1e-2);
     }
 
     #[test]
-    fn test_single_note_generates_valid_glicol() {
-        let code = generate_init_preset(&[69], 0.35); // A4 = 440 Hz
-        assert!(code.contains("sin 440.00"));
-        assert!(code.contains("o: ~v0;"));
+    fn test_voice_allocation_and_release() {
+        let mut voices = [Voice::default(); MAX_VOICES];
+        let sample_rate = 44100.0_f32;
 
-        let mut engine = Engine::<128>::new();
-        engine.update_with_code(&code);
-        let (buffers, _) = engine.next_block(vec![]);
-        assert_eq!(buffers.len(), 2);
-        assert_eq!(buffers[0].len(), 128);
-    }
+        // Trigger note 48 (C3)
+        let note = 48;
+        let freq = 440.0 * 2.0_f32.powf((f32::from(note) - 69.0) / 12.0);
+        voices[0] = Voice {
+            note,
+            freq,
+            phase: 0.0,
+            gain: 0.0,
+            target_gain: 0.3,
+            active: true,
+        };
 
-    #[test]
-    fn test_octave_frequencies() {
-        let code_a3 = generate_init_preset(&[57], 0.35);
-        assert!(code_a3.contains("sin 220.00"));
-
-        let code_a4 = generate_init_preset(&[69], 0.35);
-        assert!(code_a4.contains("sin 440.00"));
-
-        let code_a5 = generate_init_preset(&[81], 0.35);
-        assert!(code_a5.contains("sin 880.00"));
-    }
-
-    #[test]
-    fn test_large_voicing_gain_scaling() {
-        let dense_voicing = vec![48, 52, 55, 59, 62, 65, 69, 72]; // 8 voices
-        let code = generate_init_preset(&dense_voicing, 0.40);
-        let mut engine = Engine::<128>::new();
-        engine.update_with_code(&code);
-        let (buffers, _) = engine.next_block(vec![]);
-        for &sample in buffers[0].iter() {
-            assert!(sample.abs() <= 1.0, "Sample should not clip: {sample}");
+        // Render 100 samples (attack phase)
+        for _ in 0..100 {
+            let coef = 0.012_f32;
+            voices[0].gain += (voices[0].target_gain - voices[0].gain) * coef;
+            voices[0].phase += voices[0].freq / sample_rate;
+            if voices[0].phase >= 1.0 {
+                voices[0].phase -= 1.0;
+            }
         }
+        assert!(voices[0].gain > 0.15);
+
+        // Release note (damper fall)
+        voices[0].target_gain = 0.0;
+        for _ in 0..20000 {
+            let coef = 0.0007_f32;
+            voices[0].gain += (voices[0].target_gain - voices[0].gain) * coef;
+            if voices[0].gain < 0.0001 {
+                voices[0].active = false;
+                break;
+            }
+        }
+        assert!(!voices[0].active);
     }
 }
