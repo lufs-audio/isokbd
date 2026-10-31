@@ -1,12 +1,110 @@
 //! Main application state, event handling, and inactivity decay loop.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use ratatui::style::Color;
 use std::collections::{BTreeSet, HashSet};
 
 use crate::layout::{LayoutMode, calculate_midi_note, char_to_coord};
 use crate::midi::MidiEngine;
 use crate::synth::SynthEngine;
 use crate::theory::{detect_chord, note_to_name};
+
+/// Runtime-selectable color themes for the terminal instrument.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Theme {
+    /// LUFS ecosystem palette: charcoal ground, teal lead, gold accent.
+    #[default]
+    GeneseLufs,
+    /// DR ecosystem palette: warm near-black ground, gold lead, plum accent.
+    GeneseDr,
+    /// The original basic ANSI colors.
+    ClassicAnsi,
+}
+
+/// Semantic color tokens resolved from the active [`Theme`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ColorPalette {
+    /// Base background / ground.
+    pub bg: Color,
+    /// Primary active color (teal or gold).
+    pub lead: Color,
+    /// Secondary active color (gold or plum).
+    pub accent: Color,
+    /// Root-key indicator.
+    pub root: Color,
+    /// Natural key surface text.
+    pub natural_fg: Color,
+    /// Accidental (sharp/flat) key surface text.
+    pub accidental_fg: Color,
+    /// Background of a physically held key.
+    pub held_bg: Color,
+    /// Foreground of a physically held key.
+    pub held_fg: Color,
+    /// Background of a key ringing under the sustain pedal.
+    pub sustain_bg: Color,
+}
+
+impl Theme {
+    /// The next theme in the cycle.
+    #[must_use]
+    pub fn next(&self) -> Self {
+        match self {
+            Self::GeneseLufs => Self::GeneseDr,
+            Self::GeneseDr => Self::ClassicAnsi,
+            Self::ClassicAnsi => Self::GeneseLufs,
+        }
+    }
+
+    /// Human-readable theme name shown in the header bar.
+    #[must_use]
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::GeneseLufs => "Genese LUFS",
+            Self::GeneseDr => "Genese DR",
+            Self::ClassicAnsi => "Classic ANSI",
+        }
+    }
+
+    /// Resolves the theme's semantic color tokens.
+    #[must_use]
+    pub fn palette(&self) -> ColorPalette {
+        match self {
+            Self::GeneseLufs => ColorPalette {
+                bg: Color::Rgb(0x11, 0x11, 0x11),
+                lead: Color::Rgb(0x78, 0xBE, 0xBA),
+                accent: Color::Rgb(0xD9, 0xA2, 0x3D),
+                root: Color::Rgb(0xD9, 0xA2, 0x3D),
+                natural_fg: Color::Rgb(0xE6, 0xE6, 0xE6),
+                accidental_fg: Color::Rgb(0x6A, 0x6A, 0x6A),
+                held_bg: Color::Rgb(0x78, 0xBE, 0xBA),
+                held_fg: Color::Rgb(0x11, 0x11, 0x11),
+                sustain_bg: Color::Rgb(0xC4, 0x45, 0x7E),
+            },
+            Self::GeneseDr => ColorPalette {
+                bg: Color::Rgb(0x1A, 0x1A, 0x18),
+                lead: Color::Rgb(0xD9, 0xA2, 0x3D),
+                accent: Color::Rgb(0x9E, 0x73, 0x86),
+                root: Color::Rgb(0xD9, 0xA2, 0x3D),
+                natural_fg: Color::Rgb(0xD8, 0xD2, 0xC4),
+                accidental_fg: Color::Rgb(0x6E, 0x64, 0x59),
+                held_bg: Color::Rgb(0xD9, 0xA2, 0x3D),
+                held_fg: Color::Rgb(0x1A, 0x1A, 0x18),
+                sustain_bg: Color::Rgb(0x9E, 0x73, 0x86),
+            },
+            Self::ClassicAnsi => ColorPalette {
+                bg: Color::Black,
+                lead: Color::Cyan,
+                accent: Color::Yellow,
+                root: Color::Yellow,
+                natural_fg: Color::White,
+                accidental_fg: Color::DarkGray,
+                held_bg: Color::Yellow,
+                held_fg: Color::Black,
+                sustain_bg: Color::Green,
+            },
+        }
+    }
+}
 
 pub struct App {
     pub layout_mode: LayoutMode,
@@ -21,6 +119,7 @@ pub struct App {
     pub detected_chord: Option<String>,
     pub status_message: Option<String>,
     pub should_quit: bool,
+    pub theme: Theme,
 }
 
 impl App {
@@ -39,6 +138,7 @@ impl App {
             detected_chord: None,
             status_message: None,
             should_quit: false,
+            theme: Theme::default(),
         }
     }
 
@@ -137,6 +237,10 @@ impl App {
                 self.is_space_held = true;
                 self.status_message =
                     Some("Sustain Pedal: ENGAGED (Hold Space & tap notes)".to_string());
+            }
+            KeyCode::F(2) | KeyCode::Char('T') => {
+                self.theme = self.theme.next();
+                self.status_message = Some(format!("Theme: {}", self.theme.name()));
             }
             KeyCode::Enter => {
                 if let Some(ref mut s) = self.synth {
@@ -255,6 +359,50 @@ impl App {
 #[allow(clippy::expect_used, clippy::unwrap_used)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn theme_cycles_through_all_variants() {
+        assert_eq!(Theme::default(), Theme::GeneseLufs);
+        assert_eq!(Theme::GeneseLufs.next(), Theme::GeneseDr);
+        assert_eq!(Theme::GeneseDr.next(), Theme::ClassicAnsi);
+        assert_eq!(Theme::ClassicAnsi.next(), Theme::GeneseLufs);
+        // A full cycle returns to the start.
+        assert_eq!(Theme::default().next().next().next(), Theme::default());
+        assert_eq!(Theme::GeneseLufs.name(), "Genese LUFS");
+        assert_eq!(Theme::GeneseDr.name(), "Genese DR");
+        assert_eq!(Theme::ClassicAnsi.name(), "Classic ANSI");
+    }
+
+    #[test]
+    fn theme_palettes_use_documented_tokens() {
+        let lufs = Theme::GeneseLufs.palette();
+        assert_eq!(lufs.bg, Color::Rgb(0x11, 0x11, 0x11));
+        assert_eq!(lufs.lead, Color::Rgb(0x78, 0xBE, 0xBA));
+        assert_eq!(lufs.accent, Color::Rgb(0xD9, 0xA2, 0x3D));
+        assert_eq!(lufs.sustain_bg, Color::Rgb(0xC4, 0x45, 0x7E));
+
+        let dr = Theme::GeneseDr.palette();
+        assert_eq!(dr.bg, Color::Rgb(0x1A, 0x1A, 0x18));
+        assert_eq!(dr.lead, Color::Rgb(0xD9, 0xA2, 0x3D));
+        assert_eq!(dr.accent, Color::Rgb(0x9E, 0x73, 0x86));
+
+        // The ANSI fallback keeps the original terminal colors.
+        let ansi = Theme::ClassicAnsi.palette();
+        assert_eq!(ansi.lead, Color::Cyan);
+        assert_eq!(ansi.accent, Color::Yellow);
+        assert_eq!(ansi.natural_fg, Color::White);
+    }
+
+    #[test]
+    fn theme_shortcut_cycles_and_reports() {
+        let mut app = App::new(MidiEngine::silent(), None);
+        assert_eq!(app.theme, Theme::GeneseLufs);
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('T'), KeyModifiers::SHIFT));
+        assert_eq!(app.theme, Theme::GeneseDr);
+        assert_eq!(app.status_message.as_deref(), Some("Theme: Genese DR"));
+        app.handle_key_event(KeyEvent::new(KeyCode::F(2), KeyModifiers::NONE));
+        assert_eq!(app.theme, Theme::ClassicAnsi);
+    }
 
     #[test]
     fn test_momentary_sustain_pedal_stacking() {
