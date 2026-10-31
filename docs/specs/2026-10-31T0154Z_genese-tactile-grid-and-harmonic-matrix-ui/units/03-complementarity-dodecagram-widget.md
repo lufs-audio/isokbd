@@ -33,7 +33,7 @@ impl PitchClassSet {
 pub fn render_dodecagram_panel(frame: &mut Frame, area: Rect, app: &App, pc_set: PitchClassSet);
 ```
 
-## Boundaries
+## Boundaries — do NOT touch
 - **Touches:**
   - `src/theory.rs`
   - `src/ui.rs`
@@ -41,6 +41,11 @@ pub fn render_dodecagram_panel(frame: &mut Frame, area: Rect, app: &App, pc_set:
   - `src/synth.rs`
   - `src/midi.rs`
   - `src/app.rs`
+
+## Output
+- Modified: `src/theory.rs` (`complement`, `pitch_class_names`); `src/ui.rs` (`render_dodecagram_panel`).
+- Tests added in `src/theory.rs` (`#[cfg(test)] mod tests`) asserting complement symmetry (`k + (12 - k) == 12`) and known chord geometries (triad triangle, diminished-seventh square, whole-tone hexagon).
+- Commit message: `feat(ui): dodecagram panel with modal complementarity`
 
 ## Verification
 ```bash

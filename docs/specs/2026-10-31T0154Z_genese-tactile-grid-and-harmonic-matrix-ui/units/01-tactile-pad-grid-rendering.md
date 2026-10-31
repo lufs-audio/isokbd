@@ -43,13 +43,18 @@ pub struct PadCell<'a> {
 pub fn render_keyboard_grid(frame: &mut Frame, area: Rect, app: &App);
 ```
 
-## Boundaries
+## Boundaries — do NOT touch
 - **Touches:**
   - `src/ui.rs`
 - **Does NOT touch:**
   - `src/synth.rs` (audio generation is independent)
   - `src/midi.rs` (MIDI pipeline is independent)
   - `src/theory.rs`
+
+## Output
+- Modified: `src/ui.rs` (`PadVisualState`, `PadCell`, `render_keyboard_grid`).
+- Tests added in `src/ui.rs` (`#[cfg(test)] mod tests`) covering pad-state selection (resting natural/accidental, root, active-held, sustained) and the compact-vs-expanded layout threshold.
+- Commit message: `feat(ui): tactile box-drawn pad grid with illumination states`
 
 ## Verification
 ```bash
