@@ -1,9 +1,9 @@
 //! Main application state, event handling, and inactivity decay loop.
 
-use std::collections::{BTreeSet, HashSet};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use std::collections::{BTreeSet, HashSet};
 
-use crate::layout::{calculate_midi_note, char_to_coord, LayoutMode};
+use crate::layout::{LayoutMode, calculate_midi_note, char_to_coord};
 use crate::midi::MidiEngine;
 use crate::synth::SynthEngine;
 use crate::theory::{detect_chord, note_to_name};
@@ -80,34 +80,47 @@ impl App {
                 self.layout_mode = self.layout_mode.next();
                 self.root_note = self.layout_mode.default_base();
                 self.all_notes_off();
-                self.status_message = Some(format!("Switched layout to {}", self.layout_mode.name()));
+                self.status_message =
+                    Some(format!("Switched layout to {}", self.layout_mode.name()));
             }
             KeyCode::Up => {
                 if self.root_note <= 115 {
                     self.root_note += 12;
                     self.all_notes_off();
-                    self.status_message = Some(format!("Octave Up (Root: {})", note_to_name(self.root_note)));
+                    self.status_message = Some(format!(
+                        "Octave Up (Root: {})",
+                        note_to_name(self.root_note)
+                    ));
                 }
             }
             KeyCode::Down => {
                 if self.root_note >= 12 {
                     self.root_note -= 12;
                     self.all_notes_off();
-                    self.status_message = Some(format!("Octave Down (Root: {})", note_to_name(self.root_note)));
+                    self.status_message = Some(format!(
+                        "Octave Down (Root: {})",
+                        note_to_name(self.root_note)
+                    ));
                 }
             }
             KeyCode::Right => {
                 if self.root_note < 127 {
                     self.root_note += 1;
                     self.all_notes_off();
-                    self.status_message = Some(format!("Transpose Up (Root: {})", note_to_name(self.root_note)));
+                    self.status_message = Some(format!(
+                        "Transpose Up (Root: {})",
+                        note_to_name(self.root_note)
+                    ));
                 }
             }
             KeyCode::Left => {
                 if self.root_note > 0 {
                     self.root_note -= 1;
                     self.all_notes_off();
-                    self.status_message = Some(format!("Transpose Down (Root: {})", note_to_name(self.root_note)));
+                    self.status_message = Some(format!(
+                        "Transpose Down (Root: {})",
+                        note_to_name(self.root_note)
+                    ));
                 }
             }
             KeyCode::PageUp => {
@@ -122,7 +135,8 @@ impl App {
             }
             KeyCode::Char(' ') => {
                 self.is_space_held = true;
-                self.status_message = Some("Sustain Pedal: ENGAGED (Hold Space & tap notes)".to_string());
+                self.status_message =
+                    Some("Sustain Pedal: ENGAGED (Hold Space & tap notes)".to_string());
             }
             KeyCode::Enter => {
                 if let Some(ref mut s) = self.synth {
@@ -138,12 +152,14 @@ impl App {
                         }
                     }
                 } else {
-                    self.status_message = Some("Internal synth not active (MIDI-only mode)".to_string());
+                    self.status_message =
+                        Some("Internal synth not active (MIDI-only mode)".to_string());
                 }
             }
             KeyCode::Char(c) => {
                 if let Some((row, col)) = char_to_coord(c)
-                    && let Some(note) = calculate_midi_note(row, col, self.root_note, self.layout_mode)
+                    && let Some(note) =
+                        calculate_midi_note(row, col, self.root_note, self.layout_mode)
                 {
                     let is_new_coord = self.active_coords.insert((row, col));
                     if is_new_coord && !self.active_notes.contains(&note) {
@@ -242,7 +258,7 @@ mod tests {
 
     #[test]
     fn test_momentary_sustain_pedal_stacking() {
-        let midi = MidiEngine::new().expect("Failed to create MIDI engine for test");
+        let midi = MidiEngine::silent();
         let mut app = App::new(midi, None);
 
         // 1. Depress Spacebar (sustain pedal engaged)
@@ -293,7 +309,7 @@ mod tests {
 
     #[test]
     fn test_pedal_release_preserves_physically_held_keys() {
-        let midi = MidiEngine::new().expect("Failed to create MIDI engine for test");
+        let midi = MidiEngine::silent();
         let mut app = App::new(midi, None);
 
         // Depress Spacebar

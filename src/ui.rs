@@ -1,15 +1,15 @@
 //! Terminal User Interface rendering with Ratatui.
 
 use ratatui::{
+    Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Paragraph},
-    Frame,
 };
 
 use crate::app::App;
-use crate::layout::{calculate_midi_note, ALL_ROWS};
+use crate::layout::{ALL_ROWS, calculate_midi_note};
 use crate::theory::{note_to_name, pitch_class_name};
 
 pub fn render(frame: &mut Frame, app: &App) {
@@ -18,10 +18,10 @@ pub fn render(frame: &mut Frame, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),  // Header bar
-            Constraint::Min(12),    // Keyboard grid
-            Constraint::Length(4),  // Chord / Status panel
-            Constraint::Length(3),  // Navigation / shortcuts footer
+            Constraint::Length(3), // Header bar
+            Constraint::Min(12),   // Keyboard grid
+            Constraint::Length(4), // Chord / Status panel
+            Constraint::Length(3), // Navigation / shortcuts footer
         ])
         .split(size);
 
@@ -48,21 +48,46 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App) {
         Some(s) if s.is_muted() => Span::styled("MUTED", Style::default().fg(Color::Yellow)),
         Some(s) => Span::styled(
             format!("Glicol ({})", s.preset_name()),
-            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
         ),
         None => Span::styled("OFF", Style::default().fg(Color::DarkGray)),
     };
 
     let header_line = Line::from(vec![
-        Span::styled(" ISOKBD ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            " ISOKBD ",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::raw(" │ Mode: "),
-        Span::styled(app.layout_mode.name(), Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            app.layout_mode.name(),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::raw(" │ Root: "),
-        Span::styled(format!("{root_str} ({})", app.root_note), Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            format!("{root_str} ({})", app.root_note),
+            Style::default()
+                .fg(Color::Magenta)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::raw(" │ Vel: "),
-        Span::styled(format!("{}", app.velocity), Style::default().fg(Color::White)),
+        Span::styled(
+            format!("{}", app.velocity),
+            Style::default().fg(Color::White),
+        ),
         Span::raw(" │ Pedal: "),
-        Span::styled(if app.is_space_held { "DOWN" } else { "UP" }, Style::default().fg(sustain_color).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            if app.is_space_held { "DOWN" } else { "UP" },
+            Style::default()
+                .fg(sustain_color)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::raw(" │ Synth: "),
         synth_span,
         Span::raw(" │ Port: "),
@@ -74,7 +99,9 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App) {
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(Color::DarkGray));
 
-    let paragraph = Paragraph::new(header_line).block(block).alignment(Alignment::Left);
+    let paragraph = Paragraph::new(header_line)
+        .block(block)
+        .alignment(Alignment::Left);
     frame.render_widget(paragraph, area);
 }
 
@@ -107,10 +134,16 @@ fn render_keyboard_grid(frame: &mut Frame, area: Rect, app: &App) {
             let is_held = app.active_coords.contains(&(row_idx, key.col));
             let midi_note = calculate_midi_note(row_idx, key.col, app.root_note, app.layout_mode);
             let is_sustained = midi_note.is_some_and(|n| app.sustained_notes.contains(&n));
-            let note_str = midi_note.map(note_to_name).unwrap_or_else(|| "--".to_string());
+            let note_str = midi_note
+                .map(note_to_name)
+                .unwrap_or_else(|| "--".to_string());
 
-            let is_root = midi_note.map(|n| n % 12 == app.root_note % 12).unwrap_or(false);
-            let is_black_key = midi_note.map(|n| pitch_class_name(n).contains('#')).unwrap_or(false);
+            let is_root = midi_note
+                .map(|n| n % 12 == app.root_note % 12)
+                .unwrap_or(false);
+            let is_black_key = midi_note
+                .map(|n| pitch_class_name(n).contains('#'))
+                .unwrap_or(false);
 
             let style = if is_held {
                 // Key currently physically pressed
@@ -167,7 +200,9 @@ fn render_chord_panel(frame: &mut Frame, area: Rect, app: &App) {
             Span::styled("Chord: ", Style::default().fg(Color::DarkGray)),
             Span::styled(
                 chord_title,
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
             ),
         ]),
         Line::from(vec![
@@ -197,19 +232,52 @@ fn render_chord_panel(frame: &mut Frame, area: Rect, app: &App) {
 
 fn render_footer(frame: &mut Frame, area: Rect) {
     let footer_line = Line::from(vec![
-        Span::styled(" [↑/↓] ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            " [↑/↓] ",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::raw("Octave  "),
-        Span::styled(" [←/→] ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            " [←/→] ",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::raw("Transpose  "),
-        Span::styled(" [Tab] ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            " [Tab] ",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::raw("Layout  "),
-        Span::styled(" [Space] ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            " [Space] ",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::raw("Pedal (Hold)  "),
-        Span::styled(" [Enter] ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            " [Enter] ",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::raw("Synth  "),
-        Span::styled(" [PgUp/PgDn] ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            " [PgUp/PgDn] ",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::raw("Vel  "),
-        Span::styled(" [Esc/Ctrl+C] ", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            " [Esc/Ctrl+C] ",
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+        ),
         Span::raw("Quit"),
     ]);
 
@@ -218,6 +286,8 @@ fn render_footer(frame: &mut Frame, area: Rect) {
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(Color::DarkGray));
 
-    let paragraph = Paragraph::new(footer_line).block(block).alignment(Alignment::Center);
+    let paragraph = Paragraph::new(footer_line)
+        .block(block)
+        .alignment(Alignment::Center);
     frame.render_widget(paragraph, area);
 }

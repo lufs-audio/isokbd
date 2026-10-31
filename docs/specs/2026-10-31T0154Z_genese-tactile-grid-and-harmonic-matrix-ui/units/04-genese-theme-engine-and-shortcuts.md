@@ -57,7 +57,7 @@ pub struct ColorPalette {
 }
 ```
 
-## Boundaries
+## Boundaries — do NOT touch
 - **Touches:**
   - `src/app.rs`
   - `src/ui.rs`
@@ -65,6 +65,11 @@ pub struct ColorPalette {
   - `src/synth.rs`
   - `src/midi.rs`
   - `src/layout.rs`
+
+## Output
+- Modified: `src/app.rs` (`Theme`, `ColorPalette`, `next`, `name`, `palette`, `T` key handling); `src/ui.rs` (all colors resolved from the active palette instead of hardcoded ANSI).
+- Tests added in `src/app.rs` (`#[cfg(test)] mod tests`) for theme cycling and palette contents.
+- Commit message: `feat(theme): GeneseLufs / GeneseDr TrueColor palettes with runtime toggle`
 
 ## Verification
 ```bash
