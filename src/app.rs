@@ -12,8 +12,11 @@ use crate::theory::{detect_chord, note_to_name};
 /// Runtime-selectable color themes for the terminal instrument.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Theme {
-    /// LUFS ecosystem palette: charcoal ground, teal lead, gold accent.
+    /// Catppuccin Mocha: the default. Soft dark ground with blue lead and a
+    /// mauve accent.
     #[default]
+    Catppuccin,
+    /// LUFS ecosystem palette: charcoal ground, teal lead, gold accent.
     GeneseLufs,
     /// DR ecosystem palette: warm near-black ground, gold lead, plum accent.
     GeneseDr,
@@ -49,9 +52,10 @@ impl Theme {
     #[must_use]
     pub fn next(&self) -> Self {
         match self {
+            Self::Catppuccin => Self::GeneseLufs,
             Self::GeneseLufs => Self::GeneseDr,
             Self::GeneseDr => Self::ClassicAnsi,
-            Self::ClassicAnsi => Self::GeneseLufs,
+            Self::ClassicAnsi => Self::Catppuccin,
         }
     }
 
@@ -59,6 +63,7 @@ impl Theme {
     #[must_use]
     pub fn name(&self) -> &'static str {
         match self {
+            Self::Catppuccin => "Catppuccin Mocha",
             Self::GeneseLufs => "Genese LUFS",
             Self::GeneseDr => "Genese DR",
             Self::ClassicAnsi => "Classic ANSI",
@@ -69,6 +74,19 @@ impl Theme {
     #[must_use]
     pub fn palette(&self) -> ColorPalette {
         match self {
+            // Catppuccin Mocha tokens: base #1E1E2E, blue #89B4FA, mauve #CBA6F7,
+            // peach #FAB387, text #CDD6F4, overlay0 #6C7086, teal #94E2D5.
+            Self::Catppuccin => ColorPalette {
+                bg: Color::Rgb(0x1E, 0x1E, 0x2E),
+                lead: Color::Rgb(0x89, 0xB4, 0xFA),
+                accent: Color::Rgb(0xCB, 0xA6, 0xF7),
+                root: Color::Rgb(0xFA, 0xB3, 0x87),
+                natural_fg: Color::Rgb(0xCD, 0xD6, 0xF4),
+                accidental_fg: Color::Rgb(0x6C, 0x70, 0x86),
+                held_bg: Color::Rgb(0x89, 0xB4, 0xFA),
+                held_fg: Color::Rgb(0x1E, 0x1E, 0x2E),
+                sustain_bg: Color::Rgb(0x94, 0xE2, 0xD5),
+            },
             Self::GeneseLufs => ColorPalette {
                 bg: Color::Rgb(0x11, 0x11, 0x11),
                 lead: Color::Rgb(0x78, 0xBE, 0xBA),
@@ -120,6 +138,9 @@ pub struct App {
     pub status_message: Option<String>,
     pub should_quit: bool,
     pub theme: Theme,
+    /// When false the QWERTY grid hides its key/note lettering and renders
+    /// illuminated pads only, for a clean harmonic-field view.
+    pub show_labels: bool,
 }
 
 impl App {
@@ -139,6 +160,7 @@ impl App {
             status_message: None,
             should_quit: false,
             theme: Theme::default(),
+            show_labels: true,
         }
     }
 
@@ -238,9 +260,15 @@ impl App {
                 self.status_message =
                     Some("Sustain Pedal: ENGAGED (Hold Space & tap notes)".to_string());
             }
-            KeyCode::F(2) | KeyCode::Char('T') => {
-                self.theme = self.theme.next();
-                self.status_message = Some(format!("Theme: {}", self.theme.name()));
+            // `T` is a playable pad (B3) in every layout, so it must never be
+            // reserved for UI: only `F2` and `Ctrl+T` cycle the palette.
+            KeyCode::F(2) => self.cycle_theme(),
+            KeyCode::Char('t' | 'T') if event.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.cycle_theme();
+            }
+            KeyCode::F(3) => self.toggle_labels(),
+            KeyCode::Char('l' | 'L') if event.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.toggle_labels();
             }
             KeyCode::Enter => {
                 if let Some(ref mut s) = self.synth {
@@ -342,6 +370,21 @@ impl App {
         self.detected_chord = None;
     }
 
+    /// Advances to the next color theme and reports it in the status line.
+    fn cycle_theme(&mut self) {
+        self.theme = self.theme.next();
+        self.status_message = Some(format!("Theme: {}", self.theme.name()));
+    }
+
+    /// Shows or hides the grid lettering and reports the new state.
+    fn toggle_labels(&mut self) {
+        self.show_labels = !self.show_labels;
+        self.status_message = Some(format!(
+            "Grid Labels: {}",
+            if self.show_labels { "ON" } else { "OFF" }
+        ));
+    }
+
     fn sync_synth_volume(&mut self) {
         if let Some(ref mut s) = self.synth {
             let scaled_vol = (f32::from(self.velocity) / 127.0) * 0.45;
@@ -362,12 +405,17 @@ mod tests {
 
     #[test]
     fn theme_cycles_through_all_variants() {
-        assert_eq!(Theme::default(), Theme::GeneseLufs);
+        assert_eq!(Theme::default(), Theme::Catppuccin);
+        assert_eq!(Theme::Catppuccin.next(), Theme::GeneseLufs);
         assert_eq!(Theme::GeneseLufs.next(), Theme::GeneseDr);
         assert_eq!(Theme::GeneseDr.next(), Theme::ClassicAnsi);
-        assert_eq!(Theme::ClassicAnsi.next(), Theme::GeneseLufs);
+        assert_eq!(Theme::ClassicAnsi.next(), Theme::Catppuccin);
         // A full cycle returns to the start.
-        assert_eq!(Theme::default().next().next().next(), Theme::default());
+        assert_eq!(
+            Theme::default().next().next().next().next(),
+            Theme::default()
+        );
+        assert_eq!(Theme::Catppuccin.name(), "Catppuccin Mocha");
         assert_eq!(Theme::GeneseLufs.name(), "Genese LUFS");
         assert_eq!(Theme::GeneseDr.name(), "Genese DR");
         assert_eq!(Theme::ClassicAnsi.name(), "Classic ANSI");
@@ -375,6 +423,14 @@ mod tests {
 
     #[test]
     fn theme_palettes_use_documented_tokens() {
+        // Catppuccin Mocha is the default and must resolve its documented tokens.
+        let cat = Theme::Catppuccin.palette();
+        assert_eq!(cat.bg, Color::Rgb(0x1E, 0x1E, 0x2E));
+        assert_eq!(cat.lead, Color::Rgb(0x89, 0xB4, 0xFA));
+        assert_eq!(cat.accent, Color::Rgb(0xCB, 0xA6, 0xF7));
+        assert_eq!(cat.root, Color::Rgb(0xFA, 0xB3, 0x87));
+        assert_eq!(cat.sustain_bg, Color::Rgb(0x94, 0xE2, 0xD5));
+
         let lufs = Theme::GeneseLufs.palette();
         assert_eq!(lufs.bg, Color::Rgb(0x11, 0x11, 0x11));
         assert_eq!(lufs.lead, Color::Rgb(0x78, 0xBE, 0xBA));
@@ -396,12 +452,31 @@ mod tests {
     #[test]
     fn theme_shortcut_cycles_and_reports() {
         let mut app = App::new(MidiEngine::silent(), None);
-        assert_eq!(app.theme, Theme::GeneseLufs);
-        app.handle_key_event(KeyEvent::new(KeyCode::Char('T'), KeyModifiers::SHIFT));
-        assert_eq!(app.theme, Theme::GeneseDr);
-        assert_eq!(app.status_message.as_deref(), Some("Theme: Genese DR"));
+        assert_eq!(app.theme, Theme::Catppuccin);
         app.handle_key_event(KeyEvent::new(KeyCode::F(2), KeyModifiers::NONE));
-        assert_eq!(app.theme, Theme::ClassicAnsi);
+        assert_eq!(app.theme, Theme::GeneseLufs);
+        assert_eq!(app.status_message.as_deref(), Some("Theme: Genese LUFS"));
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::CONTROL));
+        assert_eq!(app.theme, Theme::GeneseDr);
+    }
+
+    #[test]
+    fn playable_t_key_is_not_hijacked_by_theme_cycle() {
+        let mut app = App::new(MidiEngine::silent(), None);
+
+        // `T` is the (row 2, col 4) pad, which is B3 = 59 in Wicki-Hayden.
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('T'), KeyModifiers::SHIFT));
+        assert_eq!(
+            app.theme,
+            Theme::Catppuccin,
+            "Shift+T must not steal the note key"
+        );
+        assert!(app.active_notes.contains(&59), "Shift+T must play B3");
+
+        // Lowercase `t` is the same pad and must also stay playable.
+        app.handle_key_event(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE));
+        assert!(app.active_notes.contains(&59));
+        assert_eq!(app.theme, Theme::Catppuccin);
     }
 
     #[test]
