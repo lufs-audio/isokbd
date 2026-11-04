@@ -42,7 +42,7 @@ impl PitchClassSet {
 }
 ```
 
-## Boundaries
+## Boundaries — do NOT touch
 - **Touches:**
   - `src/theory.rs`
   - `src/ui.rs`
@@ -51,6 +51,11 @@ impl PitchClassSet {
   - `src/synth.rs`
   - `src/midi.rs`
   - `src/layout.rs`
+
+## Output
+- Modified: `src/theory.rs` (`PitchClassSet`, `from_midi_notes`, `count`, `contains`, `interval_formula`, `barcode_string`); `src/ui.rs` (interval barcode widget in the chord panel).
+- Tests added in `src/theory.rs` (`#[cfg(test)] mod tests`) for bitmask construction, density `k/12`, interval formula, and barcode rendering; plus integration coverage under `tests/` for the barcode widget.
+- Commit message: `feat(theory): 12-bit PitchClassSet with interval barcode`
 
 ## Verification
 ```bash

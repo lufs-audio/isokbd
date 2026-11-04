@@ -12,11 +12,14 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use crossterm::{
-    event::{self, Event, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags},
+    event::{
+        self, Event, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags,
+        PushKeyboardEnhancementFlags,
+    },
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use ratatui::{backend::CrosstermBackend, Terminal};
+use ratatui::{Terminal, backend::CrosstermBackend};
 
 use app::App;
 use midi::MidiEngine;
@@ -26,11 +29,7 @@ fn main() -> Result<()> {
     let default_panic = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |panic_info| {
         let _ = disable_raw_mode();
-        let _ = execute!(
-            stdout(),
-            PopKeyboardEnhancementFlags,
-            LeaveAlternateScreen
-        );
+        let _ = execute!(stdout(), PopKeyboardEnhancementFlags, LeaveAlternateScreen);
         default_panic(panic_info);
     }));
 
@@ -63,7 +62,8 @@ fn main() -> Result<()> {
         stdout,
         EnterAlternateScreen,
         PushKeyboardEnhancementFlags(enhancement_flags)
-    ).context("Failed to configure terminal enhancements")?;
+    )
+    .context("Failed to configure terminal enhancements")?;
 
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend).context("Failed to create Ratatui terminal")?;
@@ -74,9 +74,11 @@ fn main() -> Result<()> {
     while !app.should_quit {
         app.tick();
 
-        terminal.draw(|frame| {
-            ui::render(frame, &app);
-        }).context("Failed to draw TUI frame")?;
+        terminal
+            .draw(|frame| {
+                ui::render(frame, &app);
+            })
+            .context("Failed to draw TUI frame")?;
 
         if event::poll(tick_rate).context("Failed to poll terminal events")?
             && let Event::Key(key_event) = event::read().context("Failed to read terminal event")?
@@ -91,7 +93,8 @@ fn main() -> Result<()> {
         terminal.backend_mut(),
         PopKeyboardEnhancementFlags,
         LeaveAlternateScreen
-    ).context("Failed to restore terminal screen")?;
+    )
+    .context("Failed to restore terminal screen")?;
     disable_raw_mode().context("Failed to disable raw mode")?;
 
     Ok(())
