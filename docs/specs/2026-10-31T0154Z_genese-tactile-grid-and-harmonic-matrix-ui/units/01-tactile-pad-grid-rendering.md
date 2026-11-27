@@ -10,16 +10,20 @@ Upgrade the isomorphic keyboard grid rendering from flat text brackets to multi-
 - See phase spec: `docs/specs/2026-10-31T0154Z_genese-tactile-grid-and-harmonic-matrix-ui/SPEC.md`.
 
 ## Acceptance criteria
-- [ ] Render each key as a multi-line structured pad cell using Unicode box characters (`┌───┐`, `│...│`, `└───┘`) when vertical space allows (`grid_area.height >= 14`).
-- [ ] Automatically fallback to compact single-line rendering `[ 1:Eb4 ]` when terminal height is constrained.
-- [ ] Support distinct visual styles:
+- [x] Render each key as a multi-line structured pad cell using Unicode box characters (`┌───┐`, `│...│`, `└───┘`) when vertical space allows (`grid_area.height >= 14`).
+- [x] Automatically fallback to compact single-line rendering `[ 1:Eb4 ]` when terminal height is constrained.
+- [x] Support distinct visual styles:
   - **Natural resting key:** subtle border with standard text style.
   - **Accidental resting key:** darker contrast background / muted label.
   - **Root note key:** high-visibility border/glyph highlight.
   - **Physically held key:** bold illumination fill with inverted high-contrast text.
   - **Sustained ringing key:** ringing border color with subtle active background.
-- [ ] Maintain the existing QWERTY stagger offsets (`[6, 4, 2, 0]`) across all 4 rows.
+- [x] Maintain the existing QWERTY stagger offsets (`[6, 4, 2, 0]`) across all 4 rows.
 - [ ] Ensure rendering is 100% non-allocating in hot loop where possible, preserving 60+ FPS terminal redraw without stuttering.
+  - **Not met.** The render path still allocates per cell (`format!` + owned `String`) and
+    builds a `Vec` per row, and no frame-rate benchmark was run. Left unticked rather than
+    renegotiated in place — see `SPEC.md` §7 for the recorded deviation and why the
+    zero-alloc rewrite is a separate pass (it needs an owned-label change to `PadCell<'a>`).
 
 ## Interface contract
 ```rust

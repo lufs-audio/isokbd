@@ -9,14 +9,14 @@ Implement a dedicated visual harmonic analysis widget rendering a 12-point circu
 - See phase spec: `docs/specs/2026-10-31T0154Z_genese-tactile-grid-and-harmonic-matrix-ui/SPEC.md`.
 
 ## Acceptance criteria
-- [ ] Implement `PitchClassSet::complement(&self) -> PitchClassSet` returning the inverted bitmask (`!self.0 & 0x0FFF`).
-- [ ] Implement `render_dodecagram_panel()` in `src/ui.rs`, displaying a 12-point circular or compact clock diagram:
+- [x] Implement `PitchClassSet::complement(&self) -> PitchClassSet` returning the inverted bitmask (`!self.0 & 0x0FFF`).
+- [x] Implement `render_dodecagram_panel()` in `src/ui.rs`, displaying a 12-point circular or compact clock diagram:
   - 12 chromatic degrees positioned around a perimeter: 12 (C), 1 (C#), ..., 11 (B).
   - Active played pitch classes rendered as illuminated filled nodes (`●`).
   - Inactive pitch classes rendered as muted open nodes (`○` or `·`).
   - Visual lines/chords connecting active nodes when space permits.
-- [ ] Display the harmonic complement's pitch classes textually (e.g. `Complement (8): {C#, D, F, ...}`).
-- [ ] Layout collapses gracefully when horizontal width is restricted (`< 100` columns).
+- [x] Display the harmonic complement's pitch classes textually (e.g. `Complement (8): {C#, D, F, ...}`).
+- [x] Layout collapses gracefully when horizontal width is restricted (`< 100` columns).
 
 ## Interface contract
 ```rust
