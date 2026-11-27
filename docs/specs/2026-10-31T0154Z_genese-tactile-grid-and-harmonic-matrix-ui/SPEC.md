@@ -96,12 +96,12 @@ Compact terminals collapse padding to `[ 1:Eb4 ]` automatically based on `area.w
 
 ## 5. Done Criteria
 
-- [ ] Isomorphic keyboard grid renders using structured pad cells with distinct resting, root, active-held, and sustained visual states.
-- [ ] Active chords display the Genèse 12-step interval barcode (`■ □ ...`) and degree density ratio (`k / 12`).
-- [ ] Dodecagram / circular pitch-class widget renders geometric chord shapes and identifies the modal complement.
-- [ ] Three selectable color palettes (`GeneseLufs`, `GeneseDr`, `ClassicAnsi`), toggleable via `T` key during runtime.
-- [ ] Zero audio dropouts or MIDI latency regression confirmed during continuous chord playing.
-- [ ] All unit tests pass, and new tests verify `PitchClassSet` arithmetic, formula calculations, and complement symmetry.
+- [x] Isomorphic keyboard grid renders using structured pad cells with distinct resting, root, active-held, and sustained visual states.
+- [x] Active chords display the Genèse 12-step interval barcode (`■ □ ...`) and degree density ratio (`k / 12`).
+- [x] Dodecagram / circular pitch-class widget renders geometric chord shapes and identifies the modal complement.
+- [x] Selectable color palettes toggleable at runtime — **amended**: four palettes (`Catppuccin` default, `GeneseLufs`, `GeneseDr`, `ClassicAnsi`) cycled with `F2` / `Ctrl+T`, because plain `T` is a playable pad. See §7.
+- [ ] Zero audio dropouts or MIDI latency regression confirmed during continuous chord playing. — **argued, not measured**: the change is render-only and audio/MIDI still run on their own threads, but no benchmark or dropout harness exists. See §7.
+- [x] All unit tests pass, and new tests verify `PitchClassSet` arithmetic, formula calculations, and complement symmetry. — 51 tests (40 unit + 11 integration), 0 ignored.
 
 ---
 
@@ -111,3 +111,51 @@ Compact terminals collapse padding to `[ 1:Eb4 ]` automatically based on `area.w
 - **Unit 02 (`units/02-pitch-class-vector-and-interval-barcode.md`):** `PitchClassSet` 12-bit vector, interval formulas, and interval barcode widget in `src/theory.rs` and `src/ui.rs`.
 - **Unit 03 (`units/03-complementarity-dodecagram-widget.md`):** 12-point circular dodecagram widget rendering chord polygons and modal complements.
 - **Unit 04 (`units/04-genese-theme-engine-and-shortcuts.md`):** `GeneseLufs` and `GeneseDr` TrueColor themes and runtime theme toggle in `src/app.rs`.
+
+---
+
+## 7. Status — shipped, with deviations recorded
+
+Implemented on `ciani/phase2-genese-tactile-grid` (PR #5). The contracts above are left as
+written — they are the plan, not a changelog. This section records where the implementation
+deliberately departs from them, so nothing is silently renegotiated.
+
+### Done criteria, as measured
+
+| Criterion | State | Evidence |
+|---|---|---|
+| Tactile pad cells, five illumination states | met | `ui::tests::pad_state_selection_and_precedence`, `render_smoke_across_terminal_sizes` |
+| Barcode + `k/12` density | met | `theory::tests::*`, `tests/barcode_widget.rs` |
+| Dodecagram + modal complement | met | `ui::tests::dodecagram_*`, `layout_regressions::dodecagram_*` |
+| Runtime palette cycling | met (amended, see D1) | `app::tests::*theme*` |
+| Zero audio dropouts / latency regression | **not measured** | render-only change; no harness exists |
+| Tests pass, new theory tests | met | 51 passing, 0 ignored |
+
+### Unit 01's performance criterion is NOT met
+
+> "Ensure rendering is 100% non-allocating in hot loop where possible, preserving 60+ FPS
+> terminal redraw without stuttering."
+
+**Not met, and left unticked in Unit 01.** The render path still allocates per cell
+(`format!` + owned `String`) and builds a `Vec` per row; the themed-span `PadCell<'a>` shape
+hands out `&str` for the note name but the composed cell label has to be owned. No frame-rate
+benchmark was run, so 60+ FPS is not claimed either. A zero-alloc rewrite is a separate pass.
+
+### Deviations
+
+- **D1 — Theme set and default.** Unit 04 specifies three palettes with `#[default] GeneseLufs`.
+  Shipped: four (`Catppuccin` added and made the default, `GeneseLufs`, `GeneseDr`,
+  `ClassicAnsi`). The `Theme`/`ColorPalette` interface is unchanged.
+- **D2 — `T` is not a UI key.** Unit 04 asks for `T`; plain `t` is a playable pad (`B3`) in every
+  layout. Shipped: `F2` and `Ctrl+T` cycle the palette, and the footer shows `[F2] Theme`.
+- **D3 — Pad expansion is gated on height AND width.** Unit 01 ties expansion to
+  `height >= 14`; SPEC §4.2 collapses to compact on `width`. Shipped: expanded only when
+  `height >= 14 && width >= 92` (12 keys × 7 + 6 stagger + 2), so a tall-but-narrow terminal
+  cannot clip the grid.
+- **D4 — `interval_formula` omits the closing interval.** `[0,4,7,11]` returns `[4, 3, 4]`,
+  matching the example in Unit 02, not `[4,3,4,1]`.
+- **D5 — Integration tests reach into the crate by path.** `isokbd` is binary-only, so
+  `tests/barcode_widget.rs` uses `#[path = "../src/theory.rs"]`; the clean fix (`src/lib.rs` +
+  `main.rs` split) touches `main.rs`, outside the unit's Touches list.
+- **D6 — Label toggle was added.** `F3` / `Ctrl+L` hides grid lettering. Not in any unit
+  contract; needed to make the "harmonic field" reading of the pad grid usable.

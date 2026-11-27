@@ -9,14 +9,14 @@ Implement a dedicated visual harmonic analysis widget rendering a 12-point circu
 - See phase spec: `docs/specs/2026-10-31T0154Z_genese-tactile-grid-and-harmonic-matrix-ui/SPEC.md`.
 
 ## Acceptance criteria
-- [ ] Implement `PitchClassSet::complement(&self) -> PitchClassSet` returning the inverted bitmask (`!self.0 & 0x0FFF`).
-- [ ] Implement `render_dodecagram_panel()` in `src/ui.rs`, displaying a 12-point circular or compact clock diagram:
+- [x] Implement `PitchClassSet::complement(&self) -> PitchClassSet` returning the inverted bitmask (`!self.0 & 0x0FFF`).
+- [x] Implement `render_dodecagram_panel()` in `src/ui.rs`, displaying a 12-point circular or compact clock diagram:
   - 12 chromatic degrees positioned around a perimeter: 12 (C), 1 (C#), ..., 11 (B).
   - Active played pitch classes rendered as illuminated filled nodes (`●`).
   - Inactive pitch classes rendered as muted open nodes (`○` or `·`).
   - Visual lines/chords connecting active nodes when space permits.
-- [ ] Display the harmonic complement's pitch classes textually (e.g. `Complement (8): {C#, D, F, ...}`).
-- [ ] Layout collapses gracefully when horizontal width is restricted (`< 100` columns).
+- [x] Display the harmonic complement's pitch classes textually (e.g. `Complement (8): {C#, D, F, ...}`).
+- [x] Layout collapses gracefully when horizontal width is restricted (`< 100` columns).
 
 ## Interface contract
 ```rust
@@ -33,7 +33,7 @@ impl PitchClassSet {
 pub fn render_dodecagram_panel(frame: &mut Frame, area: Rect, app: &App, pc_set: PitchClassSet);
 ```
 
-## Boundaries
+## Boundaries — do NOT touch
 - **Touches:**
   - `src/theory.rs`
   - `src/ui.rs`
@@ -41,6 +41,11 @@ pub fn render_dodecagram_panel(frame: &mut Frame, area: Rect, app: &App, pc_set:
   - `src/synth.rs`
   - `src/midi.rs`
   - `src/app.rs`
+
+## Output
+- Modified: `src/theory.rs` (`complement`, `pitch_class_names`); `src/ui.rs` (`render_dodecagram_panel`).
+- Tests added in `src/theory.rs` (`#[cfg(test)] mod tests`) asserting complement symmetry (`k + (12 - k) == 12`) and known chord geometries (triad triangle, diminished-seventh square, whole-tone hexagon).
+- Commit message: `feat(ui): dodecagram panel with modal complementarity`
 
 ## Verification
 ```bash

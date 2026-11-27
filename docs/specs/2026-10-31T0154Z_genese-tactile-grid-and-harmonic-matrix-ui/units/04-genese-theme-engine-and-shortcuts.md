@@ -12,8 +12,8 @@ Introduce TrueColor theme support with the `GeneseLufs` and `GeneseDr` palettes 
 - See phase spec: `docs/specs/2026-10-31T0154Z_genese-tactile-grid-and-harmonic-matrix-ui/SPEC.md`.
 
 ## Acceptance criteria
-- [ ] Define `Theme` enum in `src/app.rs` with variants: `GeneseLufs`, `GeneseDr`, and `ClassicAnsi`.
-- [ ] Implement `ColorPalette` struct providing semantic colors:
+- [x] Define `Theme` enum in `src/app.rs` with variants: `GeneseLufs`, `GeneseDr`, and `ClassicAnsi`.
+- [x] Implement `ColorPalette` struct providing semantic colors:
   - `ground`: base background
   - `lead`: primary active color (Teal or Gold)
   - `accent`: secondary active color (Gold or Plum)
@@ -21,10 +21,10 @@ Introduce TrueColor theme support with the `GeneseLufs` and `GeneseDr` palettes 
   - `accidental`: sharp/flat key surface
   - `natural`: natural key surface
   - `sustain`: ringing pedal indicator
-- [ ] Bind key `T` (or `F2`) in `src/app.rs` `handle_key_event` to cycle through available themes on the fly.
-- [ ] Display current theme in header bar: `│ Theme: Genese LUFS │`.
-- [ ] Footer shortcuts bar updated to include `[T] Theme`.
-- [ ] Unit tests verify theme cycling and color token mappings.
+- [x] Bind key `T` (or `F2`) in `src/app.rs` `handle_key_event` to cycle through available themes on the fly.
+- [x] Display current theme in header bar: `│ Theme: Genese LUFS │`.
+- [x] Footer shortcuts bar updated to include `[T] Theme`.
+- [x] Unit tests verify theme cycling and color token mappings.
 
 ## Interface contract
 ```rust
@@ -57,7 +57,7 @@ pub struct ColorPalette {
 }
 ```
 
-## Boundaries
+## Boundaries — do NOT touch
 - **Touches:**
   - `src/app.rs`
   - `src/ui.rs`
@@ -65,6 +65,11 @@ pub struct ColorPalette {
   - `src/synth.rs`
   - `src/midi.rs`
   - `src/layout.rs`
+
+## Output
+- Modified: `src/app.rs` (`Theme`, `ColorPalette`, `next`, `name`, `palette`, `T` key handling); `src/ui.rs` (all colors resolved from the active palette instead of hardcoded ANSI).
+- Tests added in `src/app.rs` (`#[cfg(test)] mod tests`) for theme cycling and palette contents.
+- Commit message: `feat(theme): GeneseLufs / GeneseDr TrueColor palettes with runtime toggle`
 
 ## Verification
 ```bash

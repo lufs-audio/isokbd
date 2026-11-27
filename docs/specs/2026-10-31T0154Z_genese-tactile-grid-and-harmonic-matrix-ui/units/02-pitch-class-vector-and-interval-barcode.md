@@ -10,16 +10,16 @@ Implement the 12-bit pitch-class set (`PitchClassSet`) in `src/theory.rs` and re
 - See phase spec: `docs/specs/2026-10-31T0154Z_genese-tactile-grid-and-harmonic-matrix-ui/SPEC.md`.
 
 ## Acceptance criteria
-- [ ] Define `PitchClassSet(pub u16)` where bits `0..11` represent pitch classes relative to C (`0 = C`, `1 = C#`, ..., `11 = B`).
-- [ ] Implement `PitchClassSet::from_midi_notes(notes: &[u8])`.
-- [ ] Implement `PitchClassSet::count(&self) -> u8` returning degree count `k` (0..12).
-- [ ] Implement `PitchClassSet::interval_formula(&self) -> Vec<u8>` returning semitone distances between active pitch classes.
-- [ ] Implement `PitchClassSet::barcode_string(&self) -> String` producing 12-glyph string (e.g. `■ □ □ □ ■ □ □ ■ □ □ □ ■`).
-- [ ] In `src/ui.rs`, update `render_chord_panel()` to display:
+- [x] Define `PitchClassSet(pub u16)` where bits `0..11` represent pitch classes relative to C (`0 = C`, `1 = C#`, ..., `11 = B`).
+- [x] Implement `PitchClassSet::from_midi_notes(notes: &[u8])`.
+- [x] Implement `PitchClassSet::count(&self) -> u8` returning degree count `k` (0..12).
+- [x] Implement `PitchClassSet::interval_formula(&self) -> Vec<u8>` returning semitone distances between active pitch classes.
+- [x] Implement `PitchClassSet::barcode_string(&self) -> String` producing 12-glyph string (e.g. `■ □ □ □ ■ □ □ ■ □ □ □ ■`).
+- [x] In `src/ui.rs`, update `render_chord_panel()` to display:
   - The interval barcode.
   - The semitone formula (e.g. `[4, 3, 5]`).
   - Degree density ratio (`k / 12`).
-- [ ] Comprehensive unit tests verify chord conversions, interval calculations, and bitmask operations.
+- [x] Comprehensive unit tests verify chord conversions, interval calculations, and bitmask operations.
 
 ## Interface contract
 ```rust
@@ -42,7 +42,7 @@ impl PitchClassSet {
 }
 ```
 
-## Boundaries
+## Boundaries — do NOT touch
 - **Touches:**
   - `src/theory.rs`
   - `src/ui.rs`
@@ -51,6 +51,11 @@ impl PitchClassSet {
   - `src/synth.rs`
   - `src/midi.rs`
   - `src/layout.rs`
+
+## Output
+- Modified: `src/theory.rs` (`PitchClassSet`, `from_midi_notes`, `count`, `contains`, `interval_formula`, `barcode_string`); `src/ui.rs` (interval barcode widget in the chord panel).
+- Tests added in `src/theory.rs` (`#[cfg(test)] mod tests`) for bitmask construction, density `k/12`, interval formula, and barcode rendering; plus integration coverage under `tests/` for the barcode widget.
+- Commit message: `feat(theory): 12-bit PitchClassSet with interval barcode`
 
 ## Verification
 ```bash

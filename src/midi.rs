@@ -1,8 +1,8 @@
 //! MIDI Output engine leveraging `midir`.
 
-use std::process::Command;
 use midir::os::unix::VirtualOutput;
 use midir::{MidiOutput, MidiOutputConnection};
+use std::process::Command;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -21,6 +21,21 @@ pub struct MidiEngine {
     channel: u8, // 0-indexed (0..15)
 }
 
+#[cfg(test)]
+impl MidiEngine {
+    /// A connection-less engine for tests: sends are no-ops, so application
+    /// logic that does not depend on a live MIDI backend can be verified
+    /// anywhere, including headless CI runners with no ALSA sequencer.
+    #[must_use]
+    pub(crate) fn silent() -> Self {
+        Self {
+            connections: Vec::new(),
+            port_names: Vec::new(),
+            channel: 0,
+        }
+    }
+}
+
 impl MidiEngine {
     /// Initializes MIDI connection. Connects to all available destination ports
     /// (e.g. `RTRACK_MIDI_IN`, `Midi Through Port-0`), and bridges ALSA ports if rtrack is active.
@@ -30,8 +45,8 @@ impl MidiEngine {
             .args(["Midi Through", "RTRACK_MIDI_IN"])
             .output();
 
-        let midi_out = MidiOutput::new("isokbd-probe")
-            .map_err(|e| MidiError::Init(e.to_string()))?;
+        let midi_out =
+            MidiOutput::new("isokbd-probe").map_err(|e| MidiError::Init(e.to_string()))?;
 
         let ports = midi_out.ports();
         let mut connections = Vec::new();
@@ -56,8 +71,7 @@ impl MidiEngine {
 
         if connections.is_empty() {
             // Virtual port fallback on Linux
-            let out = MidiOutput::new("isokbd")
-                .map_err(|e| MidiError::Init(e.to_string()))?;
+            let out = MidiOutput::new("isokbd").map_err(|e| MidiError::Init(e.to_string()))?;
             let conn = out
                 .create_virtual("isokbd")
                 .map_err(|e| MidiError::Connect(e.to_string()))?;
@@ -85,7 +99,8 @@ impl MidiEngine {
         let status = 0x90 | (self.channel & 0x0F);
         let msg = [status, note & 0x7F, velocity & 0x7F];
         for conn in &mut self.connections {
-            conn.send(&msg).map_err(|e| MidiError::Send(e.to_string()))?;
+            conn.send(&msg)
+                .map_err(|e| MidiError::Send(e.to_string()))?;
         }
         Ok(())
     }
@@ -94,7 +109,8 @@ impl MidiEngine {
         let status = 0x80 | (self.channel & 0x0F);
         let msg = [status, note & 0x7F, 0];
         for conn in &mut self.connections {
-            conn.send(&msg).map_err(|e| MidiError::Send(e.to_string()))?;
+            conn.send(&msg)
+                .map_err(|e| MidiError::Send(e.to_string()))?;
         }
         Ok(())
     }
@@ -104,7 +120,8 @@ impl MidiEngine {
         let status = 0xB0 | (self.channel & 0x0F);
         let msg = [status, 123, 0];
         for conn in &mut self.connections {
-            conn.send(&msg).map_err(|e| MidiError::Send(e.to_string()))?;
+            conn.send(&msg)
+                .map_err(|e| MidiError::Send(e.to_string()))?;
         }
         Ok(())
     }

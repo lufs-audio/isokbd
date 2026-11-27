@@ -1,8 +1,8 @@
 //! Built-in polyphonic synthesizer backend powered by CPAL with sample-accurate DSP.
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use ringbuf::traits::{Consumer, Producer, Split};
 use ringbuf::HeapRb;
+use ringbuf::traits::{Consumer, Producer, Split};
 use thiserror::Error;
 
 pub const MAX_VOICES: usize = 16;
@@ -167,7 +167,11 @@ impl SynthEngine {
                             }
 
                             // Hexboard parity: snappy 5ms attack, 250ms acoustic release tail ("damper fall")
-                            let coef = if v.target_gain > v.gain { 0.012_f32 } else { 0.0007_f32 };
+                            let coef = if v.target_gain > v.gain {
+                                0.012_f32
+                            } else {
+                                0.0007_f32
+                            };
                             v.gain += (v.target_gain - v.gain) * coef;
 
                             if v.gain < 0.0001 && v.target_gain == 0.0 {
@@ -183,7 +187,11 @@ impl SynthEngine {
                             }
                         }
 
-                        let out_sample = if muted { 0.0 } else { frame_sum.clamp(-1.0, 1.0) };
+                        let out_sample = if muted {
+                            0.0
+                        } else {
+                            frame_sum.clamp(-1.0, 1.0)
+                        };
 
                         if channels == 2 {
                             if let Some(s0) = data.get_mut(i * 2) {

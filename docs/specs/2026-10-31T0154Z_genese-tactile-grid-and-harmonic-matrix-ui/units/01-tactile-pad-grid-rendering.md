@@ -10,16 +10,20 @@ Upgrade the isomorphic keyboard grid rendering from flat text brackets to multi-
 - See phase spec: `docs/specs/2026-10-31T0154Z_genese-tactile-grid-and-harmonic-matrix-ui/SPEC.md`.
 
 ## Acceptance criteria
-- [ ] Render each key as a multi-line structured pad cell using Unicode box characters (`┌───┐`, `│...│`, `└───┘`) when vertical space allows (`grid_area.height >= 14`).
-- [ ] Automatically fallback to compact single-line rendering `[ 1:Eb4 ]` when terminal height is constrained.
-- [ ] Support distinct visual styles:
+- [x] Render each key as a multi-line structured pad cell using Unicode box characters (`┌───┐`, `│...│`, `└───┘`) when vertical space allows (`grid_area.height >= 14`).
+- [x] Automatically fallback to compact single-line rendering `[ 1:Eb4 ]` when terminal height is constrained.
+- [x] Support distinct visual styles:
   - **Natural resting key:** subtle border with standard text style.
   - **Accidental resting key:** darker contrast background / muted label.
   - **Root note key:** high-visibility border/glyph highlight.
   - **Physically held key:** bold illumination fill with inverted high-contrast text.
   - **Sustained ringing key:** ringing border color with subtle active background.
-- [ ] Maintain the existing QWERTY stagger offsets (`[6, 4, 2, 0]`) across all 4 rows.
+- [x] Maintain the existing QWERTY stagger offsets (`[6, 4, 2, 0]`) across all 4 rows.
 - [ ] Ensure rendering is 100% non-allocating in hot loop where possible, preserving 60+ FPS terminal redraw without stuttering.
+  - **Not met.** The render path still allocates per cell (`format!` + owned `String`) and
+    builds a `Vec` per row, and no frame-rate benchmark was run. Left unticked rather than
+    renegotiated in place — see `SPEC.md` §7 for the recorded deviation and why the
+    zero-alloc rewrite is a separate pass (it needs an owned-label change to `PadCell<'a>`).
 
 ## Interface contract
 ```rust
@@ -43,13 +47,18 @@ pub struct PadCell<'a> {
 pub fn render_keyboard_grid(frame: &mut Frame, area: Rect, app: &App);
 ```
 
-## Boundaries
+## Boundaries — do NOT touch
 - **Touches:**
   - `src/ui.rs`
 - **Does NOT touch:**
   - `src/synth.rs` (audio generation is independent)
   - `src/midi.rs` (MIDI pipeline is independent)
   - `src/theory.rs`
+
+## Output
+- Modified: `src/ui.rs` (`PadVisualState`, `PadCell`, `render_keyboard_grid`).
+- Tests added in `src/ui.rs` (`#[cfg(test)] mod tests`) covering pad-state selection (resting natural/accidental, root, active-held, sustained) and the compact-vs-expanded layout threshold.
+- Commit message: `feat(ui): tactile box-drawn pad grid with illumination states`
 
 ## Verification
 ```bash
